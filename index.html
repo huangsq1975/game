@@ -12,6 +12,7 @@ canvas { display:block; touch-action:none; }
 </head>
 <body>
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script src="units.js"></script>
 <script>
 'use strict';
 
@@ -74,12 +75,7 @@ function stepInDir(c, r, angle) {
     return best;
 }
 
-/* ─── Unit definitions ───────────────────────────────── */
-const UDEFS = {
-    cavalry:  { name:'騎兵',   ch:'騎', clr:0xFFAA22, beats:'infantry', loses:'archer',   spd:680,  atk:18, hp:80,  cost:35, r:11 },
-    archer:   { name:'弓箭手', ch:'弓', clr:0x33CC66, beats:'cavalry',  loses:'infantry', spd:1100, atk:24, hp:55,  cost:25, r:10 },
-    infantry: { name:'步兵',   ch:'步', clr:0x5599EE, beats:'archer',   loses:'cavalry',  spd:900,  atk:14, hp:120, cost:20, r:12 },
-};
+/* UDEFS 兵種配置 → 見 units.js */
 
 let uid = 0;
 
@@ -98,6 +94,7 @@ class GameScene extends Phaser.Scene {
         this.paused   = false;
         this.sel      = 'infantry';
         this.dirty    = true;        // redraw hex layer flag
+        this.timeLeft = 300;         // 5分鐘倒計時（秒）
 
         this.EB = { c:0,      r:0      };   // enemy base  top-left
         this.PB = { c:COLS-1, r:ROWS-1 };   // player base bottom-right
@@ -180,9 +177,6 @@ class GameScene extends Phaser.Scene {
         this.spawn('enemy',  'cavalry');
 
         this.input.on('pointerdown', p => this.onTap(p));
-
-        /* 60fps tick */
-        this.time.addEvent({ delay:16, callback:this.tick, callbackScope:this, loop:true });
     }
 
     k(c, r) { return `${c},${r}`; }
@@ -310,6 +304,11 @@ class GameScene extends Phaser.Scene {
             '克制: 騎>步 步>弓 弓>騎',
             { fontSize:'8px', color:'#667788' }
         ).setOrigin(1, 0).setDepth(1);
+
+        // Countdown timer (top-left)
+        this.timerTxt = this.add.text(8, 4, '05:00', {
+            fontSize:'14px', color:'#eeddaa', fontStyle:'bold'
+        }).setOrigin(0, 0).setDepth(9);
 
         // Pause button (top-center, below title)
         this.pauseBg = this.add.graphics().setDepth(8);
@@ -454,6 +453,7 @@ class GameScene extends Phaser.Scene {
             hp:def.hp, maxHp:def.hp, atk:def.atk, spd:def.spd,
             c:base.c, r:base.r, x, y,
             mvT:0, atkT:0, bleedTick:0, dead:false, dir:null, visitedForts:new Set(),
+            attackedBy: null,
             gfx: this.add.graphics().setDepth(2),
             hpg: this.add.graphics().setDepth(3),
             lbl: this.add.text(x, y, def.ch, {
@@ -474,10 +474,13 @@ class GameScene extends Phaser.Scene {
         this.pauseLbl.setText(isPaused ? '▶ 繼續' : '⏸ 暫停');
     }
 
-    /* ── Main tick (~60fps) ────────────────────────────── */
-    tick() {
+    update(time, delta) {
+        this.tick(Math.min(delta, 100));
+    }
+
+    /* ── Main tick ─────────────────────────────────────── */
+    tick(dt) {
         if (this.over || this.paused) return;
-        const dt = 16;
 
         /* Gold regen every 1s */
         this.goldT += dt;
@@ -550,6 +553,23 @@ class GameScene extends Phaser.Scene {
         /* Redraw grid if ownership changed */
         if (this.dirty) { this.drawGrid(); this.dirty = false; }
 
+        /* Countdown timer */
+        this.timeLeft -= dt / 1000;
+        if (this.timeLeft <= 0) {
+            this.timeLeft = 0;
+            /* 時間到：比較己方與敵方占領的要塞數決定勝負 */
+            const pf = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='player').length;
+            const ef = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='enemy').length;
+            this.endGame(pf >= ef);
+            return;
+        }
+        const sec  = Math.ceil(this.timeLeft);
+        const mm   = String(Math.floor(sec / 60)).padStart(2, '0');
+        const ss   = String(sec % 60).padStart(2, '0');
+        const warn = this.timeLeft <= 30;
+        this.timerTxt.setText(`${mm}:${ss}`);
+        this.timerTxt.setColor(warn ? '#ff4444' : '#eeddaa');
+
         this.renderUnits();
         this.goldTxt.setText(`💰 ${Math.floor(this.gold)}`);
         this.aiGoldTxt.setText(`AI💰 ${Math.floor(this.aiGold)}`);
@@ -560,12 +580,38 @@ class GameScene extends Phaser.Scene {
         const dm = u.team==='player' ? this.dE : this.dP;
         const ns = nbrs(u.c, u.r);
 
-        /* Enemies on same hex or adjacent */
-        const foes = this.units.filter(v =>
-            !v.dead && v.team !== u.team &&
-            (v.c===u.c && v.r===u.r ||
-             ns.some(([c,r]) => v.c===c && v.r===r))
-        );
+        /* Determine next move destination */
+        const arr = (u.team==='player' ? this.arrowP : this.arrowE)[this.k(u.c, u.r)];
+        let nextC = null, nextR = null;
+        if (arr) {
+            nextC = arr[0]; nextR = arr[1];
+        } else if (u.dir !== null) {
+            const [nc, nr] = stepInDir(u.c, u.r, u.dir);
+            if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+                nextC = nc; nextR = nr;
+            }
+        }
+
+        /* Retaliation: check if our attacker is still nearby */
+        let retaliateId = null;
+        if (u.attackedBy !== null) {
+            const attacker = this.units.find(v => !v.dead && v.id === u.attackedBy);
+            if (attacker) {
+                const nearby = (attacker.c === u.c && attacker.r === u.r) ||
+                    ns.some(([c,r]) => attacker.c === c && attacker.r === r);
+                if (nearby) retaliateId = u.attackedBy;
+            }
+            if (retaliateId === null) u.attackedBy = null;
+        }
+
+        /* Enemies to fight: same hex, movement direction, or retaliation */
+        const foes = this.units.filter(v => {
+            if (v.dead || v.team === u.team) return false;
+            if (v.c === u.c && v.r === u.r) return true;
+            if (nextC !== null && v.c === nextC && v.r === nextR) return true;
+            if (retaliateId !== null && v.id === retaliateId) return true;
+            return false;
+        });
 
         if (foes.length > 0) {
             /* Fight */
@@ -579,9 +625,8 @@ class GameScene extends Phaser.Scene {
                 else if (def.loses === tgt.type) dmg = Math.round(dmg * 0.6);
                 dmg += Phaser.Math.Between(-2, 3);
                 tgt.hp -= dmg;
+                tgt.attackedBy = u.id;   // 被攻擊 → 記錄攻擊者以便反擊
                 if (tgt.hp <= 0) tgt.dead = true;
-
-                /* Damage number */
                 this.showDmg(tgt.x, tgt.y, dmg, tgt.team);
             }
         } else {
@@ -590,8 +635,6 @@ class GameScene extends Phaser.Scene {
             if (u.mvT >= u.spd) {
                 u.mvT = 0;
 
-                /* Arrow hex: update direction then step to target */
-                const arr = (u.team==='player' ? this.arrowP : this.arrowE)[this.k(u.c, u.r)];
                 if (arr) {
                     const {x: fx, y: fy} = h2p(u.c, u.r);
                     const {x: tx, y: ty} = h2p(arr[0], arr[1]);
@@ -602,11 +645,10 @@ class GameScene extends Phaser.Scene {
                     return;
                 }
 
-                /* No arrow: keep going in stored direction */
-                if (u.dir === null) return; // no direction yet, wait
+                if (u.dir === null) return;
                 const [nc, nr] = stepInDir(u.c, u.r, u.dir);
                 if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS) {
-                    u.dead = true; // hit boundary → self-destruct
+                    u.dead = true;
                     return;
                 }
                 u.c = nc; u.r = nr;
@@ -762,7 +804,6 @@ class GameScene extends Phaser.Scene {
         btn.on('pointerdown', () => this.scene.restart());
     }
 
-    update() {}
 }
 
 /* ─── Boot / Start Scene ─────────────────────────────── */
