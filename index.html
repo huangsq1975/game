@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>六邊形戰閃電戰</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#060c14; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
+canvas { display:block; touch-action:none; }
+</style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
+'use strict';
+
+/* ─── Config ─────────────────────────────────────────── */
+const W = 390, H = 780;
+const COLS = 7, ROWS = 10;
+const SZ   = 33;          // hex circumradius
+const UI_H = 148;
+const TOP  = 36;          // grid top offset
+
+/* ─── Flat-top hex geometry (odd-q: odd cols shift DOWN) */
+function h2p(c, r) {
+    return {
+        x: 38 + SZ * 1.5 * c,
+        y: TOP + SZ * Math.sqrt(3) * (r + (c & 1) * 0.5)
+    };
+}
+
+/* Neighbours for flat-top odd-q offset */
+function nbrs(col, row) {
+    const e = [[col,row-1],[col,row+1],[col+1,row-1],[col+1,row],[col-1,row-1],[col-1,row]];
+    const o = [[col,row-1],[col,row+1],[col+1,row],[col+1,row+1],[col-1,row],[col-1,row+1]];
+    return ((col & 1) ? o : e).filter(([c,r]) => c>=0 && c<COLS && r>=0 && r<ROWS);
+}
+
+/* BFS distance map from target hex */
+function bfs(tc, tr) {
+    const d = {}, q = [[tc, tr, 0]];
+    d[`${tc},${tr}`] = 0;
+    while (q.length) {
+        const [c, r, n] = q.shift();
+        for (const [nc, nr] of nbrs(c, r)) {
+            const k = `${nc},${nr}`;
+            if (!(k in d)) { d[k] = n + 1; q.push([nc, nr, n+1]); }
+        }
+    }
+    return d;
+}
+
+/* ─── Unit definitions ───────────────────────────────── */
+const UDEFS = {
+    cavalry:  { name:'騎兵',   ch:'騎', clr:0xFFAA22, beats:'infantry', loses:'archer',   spd:680,  atk:18, hp:80,  cost:35, r:11 },
+    archer:   { name:'弓箭手', ch:'弓', clr:0x33CC66, beats:'cavalry',  loses:'infantry', spd:1100, atk:24, hp:55,  cost:25, r:10 },
+    infantry: { name:'步兵',   ch:'步', clr:0x5599EE, beats:'archer',   loses:'cavalry',  spd:900,  atk:14, hp:120, cost:20, r:12 },
+};
+
+let uid = 0;
+
+/* ─── Main Scene ─────────────────────────────────────── */
+class GameScene extends Phaser.Scene {
+    constructor() { super('Game'); }
+
+    create() {
+        this.units    = [];
+        this.hexOwner = {};          // "c,r" -> 'player'|'enemy'
+        this.gold     = 80;
+        this.aiGold   = 80;
+        this.goldT    = 0;
+        this.aiT      = 0;
+        this.over     = false;
+        this.paused   = false;
+        this.sel      = 'infantry';
+        this.dirty    = true;        // redraw hex layer flag
+
+        this.EB = { c:0,      r:0      };   // enemy base  top-left
+        this.PB = { c:COLS-1, r:ROWS-1 };   // player base bottom-right
+        this.forts = [{ c:2, r:4 }, { c:3, r:5 }];
+
+        this.dE = bfs(this.EB.c, this.EB.r);   // dist to enemy base
+        this.dP = bfs(this.PB.c, this.PB.r);   // dist to player base
+
+        /* Graphics layers */
+        this.gHex  = this.add.graphics().setDepth(0);
+        this.gUnit = this.add.graphics().setDepth(2);
+        this.gHp   = this.add.graphics().setDepth(3);
+
+        this.drawGrid();
+        this.buildStaticText();
+        this.buildUI();
+
+        /* Initial units */
+        this.spawn('player', 'infantry');
+        this.spawn('enemy',  'cavalry');
+
+        this.input.on('pointerdown', p => this.onTap(p));
+
+        /* 60fps tick */
+        this.time.addEvent({ delay:16, callback:this.tick, callbackScope:this, loop:true });
+    }
+
+    k(c, r) { return `${c},${r}`; }
+
+    /* ── Grid ──────────────────────────────────────────── */
+    drawGrid() {
+        this.gHex.clear();
+        for (let c = 0; c < COLS; c++) {
+            for (let r = 0; r < ROWS; r++) {
+                const {x, y} = h2p(c, r);
+                const isFort = this.forts.some(f => f.c===c && f.r===r);
+                const isEB   = c===this.EB.c && r===this.EB.r;
+                const isPB   = c===this.PB.c && r===this.PB.r;
+                const ow     = this.hexOwner[this.k(c, r)];
+
+                let fill = 0x3a4d5c, stroke = 0x5f7a8a;
+                if      (isEB)  { fill = 0xaa1818; stroke = 0xff5555; }
+                else if (isPB)  { fill = 0x1a2d88; stroke = 0x5577ff; }
+                else if (isFort) {
+                    fill   = ow==='player' ? 0x1e3d88 : ow==='enemy' ? 0x882222 : 0x7a6018;
+                    stroke = 0xffee44;
+                } else {
+                    if      (ow==='player') fill = 0x2a3d70;
+                    else if (ow==='enemy')  fill = 0x6a2020;
+                }
+
+                this.hexFill(x, y, SZ-1.5, fill, stroke);
+            }
+        }
+    }
+
+    hexFill(cx, cy, r, fill, stroke) {
+        const g = this.gHex;
+        const pts = Array.from({length:6}, (_,i) => ({
+            x: cx + r * Math.cos(Math.PI/3 * i),
+            y: cy + r * Math.sin(Math.PI/3 * i)
+        }));
+        g.fillStyle(fill, 1);
+        g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+        pts.slice(1).forEach(p => g.lineTo(p.x, p.y));
+        g.closePath(); g.fillPath();
+        g.lineStyle(1.5, stroke, 0.88);
+        g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+        pts.slice(1).forEach(p => g.lineTo(p.x, p.y));
+        g.closePath(); g.strokePath();
+    }
+
+    buildStaticText() {
+        const sz7 = { fontSize:'11px', color:'#8aaabb' };
+        const sz13 = { fontSize:'13px', color:'#ffee44' };
+        for (let c = 0; c < COLS; c++) {
+            for (let r = 0; r < ROWS; r++) {
+                const {x, y} = h2p(c, r);
+                // Coordinate label
+                this.add.text(x, y + SZ*0.44, `${c},${r}`, sz7)
+                    .setOrigin(0.5, 0.5).setDepth(1);
+                // Fort star
+                if (this.forts.some(f => f.c===c && f.r===r))
+                    this.add.text(x, y - 1, '★', sz13)
+                        .setOrigin(0.5, 0.5).setDepth(1);
+                // Base labels
+                if (c===this.EB.c && r===this.EB.r)
+                    this.add.text(x, y-4, '敵', { fontSize:'15px', color:'#ffaaaa', fontStyle:'bold' })
+                        .setOrigin(0.5, 0.5).setDepth(1);
+                if (c===this.PB.c && r===this.PB.r)
+                    this.add.text(x, y-4, '我', { fontSize:'15px', color:'#aaccff', fontStyle:'bold' })
+                        .setOrigin(0.5, 0.5).setDepth(1);
+            }
+        }
+        this.add.text(W/2, 4, '六邊形戰閃電戰', { fontSize:'13px', color:'#aabbcc', fontStyle:'bold' })
+            .setOrigin(0.5, 0).setDepth(1);
+
+        // Legend top-right
+        this.add.text(W-8, 4,
+            '克制: 騎>步 步>弓 弓>騎',
+            { fontSize:'8px', color:'#667788' }
+        ).setOrigin(1, 0).setDepth(1);
+
+        // Pause button (top-center, below title)
+        this.pauseBg = this.add.graphics().setDepth(8);
+        this.pauseLbl = this.add.text(W/2, 22, '⏸ 暫停', {
+            fontSize:'12px', color:'#aabbcc',
+            backgroundColor:'#1a2a3a', padding:{ x:10, y:4 }
+        }).setOrigin(0.5, 0).setInteractive().setDepth(9);
+        this.pauseLbl.on('pointerdown', () => this.togglePause());
+
+        // Pause overlay (hidden by default)
+        this.pauseOverlay = this.add.graphics().setDepth(14).setVisible(false);
+        this.pauseOverlay.fillStyle(0x000000, 0.6);
+        this.pauseOverlay.fillRect(0, 0, W, H);
+        this.pauseTxt = this.add.text(W/2, H/2, '⏸\n已暫停', {
+            fontSize:'40px', color:'#ffffff', fontStyle:'bold', align:'center', lineSpacing:8
+        }).setOrigin(0.5, 0.5).setDepth(15).setVisible(false);
+        this.resumeTxt = this.add.text(W/2, H/2+100, '  繼續遊戲  ', {
+            fontSize:'22px', color:'#ffffff',
+            backgroundColor:'#1a3a5a', padding:{ x:22, y:11 }
+        }).setOrigin(0.5, 0.5).setInteractive().setDepth(15).setVisible(false);
+        this.resumeTxt.on('pointerdown', () => this.togglePause());
+    }
+
+    /* ── UI Panel ──────────────────────────────────────── */
+    buildUI() {
+        const py = H - UI_H;
+        const bg = this.add.graphics().setDepth(4);
+        bg.fillStyle(0x080f1a, 0.96);
+        bg.fillRect(0, py, W, UI_H);
+        bg.lineStyle(1, 0x1e2e3e, 1);
+        bg.strokeRect(0, py, W, UI_H);
+
+        this.goldTxt = this.add.text(12, py+7, '💰 80', {
+            fontSize:'15px', color:'#ffdd44', fontStyle:'bold'
+        }).setDepth(5);
+
+        this.aiGoldTxt = this.add.text(W-12, py+7, 'AI💰 80', {
+            fontSize:'11px', color:'#ff8888'
+        }).setOrigin(1, 0).setDepth(5);
+
+        const types = ['cavalry', 'archer', 'infantry'];
+        const bw = 105, bh = 76, by = py + 30, gap = 8;
+        const bx0 = (W - (bw*3 + gap*2)) / 2;
+
+        this.btns = types.map((type, i) => {
+            const def = UDEFS[type];
+            const bx  = bx0 + i*(bw+gap);
+            const g2  = this.add.graphics().setDepth(4);
+            const clr = '#' + def.clr.toString(16).padStart(6,'0');
+
+            this.add.text(bx+bw/2, by+14, def.ch, { fontSize:'17px', color:clr, fontStyle:'bold' })
+                .setOrigin(0.5, 0.5).setDepth(5);
+            this.add.text(bx+bw/2, by+31, def.name, { fontSize:'11px', color:'#ccd8e8' })
+                .setOrigin(0.5, 0.5).setDepth(5);
+            this.add.text(bx+bw/2, by+46, `💰${def.cost}  HP:${def.hp}`, { fontSize:'9px', color:'#7a8a9a' })
+                .setOrigin(0.5, 0.5).setDepth(5);
+            this.add.text(bx+bw/2, by+61, `克制: ${UDEFS[def.beats].name}`, { fontSize:'8px', color:'#55aa55' })
+                .setOrigin(0.5, 0.5).setDepth(5);
+
+            const zone = this.add.zone(bx, by, bw, bh)
+                .setOrigin(0, 0).setInteractive().setDepth(6);
+            zone.on('pointerdown', () => { this.sel = type; this.refreshBtns(); });
+
+            return { type, g:g2, bx, by, bw, bh };
+        });
+        this.refreshBtns();
+
+        this.add.text(W/2, py+115,
+            '點擊右下角己方基地 部署選中兵種',
+            { fontSize:'10px', color:'#445566' }
+        ).setOrigin(0.5, 0).setDepth(5);
+
+        this.add.text(W/2, py+130,
+            '占領中央要塞★可獲得額外金幣',
+            { fontSize:'9px', color:'#556633' }
+        ).setOrigin(0.5, 0).setDepth(5);
+    }
+
+    refreshBtns() {
+        this.btns.forEach(b => {
+            b.g.clear();
+            const sel = b.type === this.sel;
+            b.g.fillStyle(sel ? 0x162944 : 0x090f1e, 1);
+            b.g.lineStyle(sel ? 2 : 1, sel ? 0xffffff : 0x1e2e3e, 1);
+            b.g.fillRoundedRect(b.bx, b.by, b.bw, b.bh, 7);
+            b.g.strokeRoundedRect(b.bx, b.by, b.bw, b.bh, 7);
+        });
+    }
+
+    /* ── Input ─────────────────────────────────────────── */
+    onTap(p) {
+        if (this.over || p.y >= H - UI_H) return;
+        // Find nearest hex
+        let best = null, bd = Infinity;
+        for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS; r++) {
+            const {x,y} = h2p(c, r);
+            const d = Math.hypot(p.x-x, p.y-y);
+            if (d < bd) { bd = d; best = {c,r}; }
+        }
+        if (!best || bd > SZ + 6) return;
+        if (best.c === this.PB.c && best.r === this.PB.r) {
+            const cost = UDEFS[this.sel].cost;
+            if (this.gold >= cost) {
+                this.gold -= cost;
+                this.spawn('player', this.sel);
+            } else {
+                this.flashNoGold();
+            }
+        }
+    }
+
+    flashNoGold() {
+        const t = this.add.text(W/2, H - UI_H - 20, '金幣不足!', {
+            fontSize:'16px', color:'#ff4444', fontStyle:'bold'
+        }).setOrigin(0.5, 1).setDepth(10);
+        this.time.delayedCall(800, () => t.destroy());
+    }
+
+    /* ── Spawn ─────────────────────────────────────────── */
+    spawn(team, type) {
+        const base = team==='player' ? this.PB : this.EB;
+        const def  = UDEFS[type];
+        const {x,y} = h2p(base.c, base.r);
+        const u = {
+            id:uid++, team, type,
+            hp:def.hp, maxHp:def.hp, atk:def.atk, spd:def.spd,
+            c:base.c, r:base.r, x, y,
+            mvT:0, atkT:0, dead:false,
+            gfx: this.add.graphics().setDepth(2),
+            hpg: this.add.graphics().setDepth(3),
+            lbl: this.add.text(x, y, def.ch, {
+                fontSize:'11px', color:'#ffffff', fontStyle:'bold'
+            }).setOrigin(0.5, 0.5).setDepth(3),
+        };
+        this.units.push(u);
+    }
+
+    /* ── Pause ─────────────────────────────────────────── */
+    togglePause() {
+        if (this.over) return;
+        this.paused = !this.paused;
+        const isPaused = this.paused;
+        this.pauseOverlay.setVisible(isPaused);
+        this.pauseTxt.setVisible(isPaused);
+        this.resumeTxt.setVisible(isPaused);
+        this.pauseLbl.setText(isPaused ? '▶ 繼續' : '⏸ 暫停');
+    }
+
+    /* ── Main tick (~60fps) ────────────────────────────── */
+    tick() {
+        if (this.over || this.paused) return;
+        const dt = 16;
+
+        /* Gold regen every 1s */
+        this.goldT += dt;
+        if (this.goldT >= 1000) {
+            this.goldT = 0;
+            this.gold   = Math.min(this.gold   + 10, 200);
+            this.aiGold = Math.min(this.aiGold + 10, 200);
+            /* Fortress bonus */
+            const pf = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='player').length;
+            const ef = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='enemy').length;
+            this.gold   = Math.min(this.gold   + pf*6, 200);
+            this.aiGold = Math.min(this.aiGold + ef*6, 200);
+        }
+
+        /* AI spawn */
+        this.aiT += dt;
+        if (this.aiT >= 2800) { this.aiT = 0; this.aiSpawn(); }
+
+        /* Update all units */
+        this.units.forEach(u => { if (!u.dead) this.updateUnit(u, dt); });
+
+        /* Remove dead */
+        this.units = this.units.filter(u => {
+            if (u.dead) { u.gfx.destroy(); u.hpg.destroy(); u.lbl.destroy(); return false; }
+            return true;
+        });
+
+        /* Win / lose */
+        const eWin = this.units.some(u => !u.dead && u.team==='enemy'  && u.c===this.PB.c && u.r===this.PB.r);
+        const pWin = this.units.some(u => !u.dead && u.team==='player' && u.c===this.EB.c && u.r===this.EB.r);
+        if (eWin) { this.endGame(false); return; }
+        if (pWin) { this.endGame(true);  return; }
+
+        /* Redraw grid if ownership changed */
+        if (this.dirty) { this.drawGrid(); this.dirty = false; }
+
+        this.renderUnits();
+        this.goldTxt.setText(`💰 ${Math.floor(this.gold)}`);
+        this.aiGoldTxt.setText(`AI💰 ${Math.floor(this.aiGold)}`);
+    }
+
+    /* ── Unit logic ────────────────────────────────────── */
+    updateUnit(u, dt) {
+        const dm = u.team==='player' ? this.dE : this.dP;
+        const ns = nbrs(u.c, u.r);
+
+        /* Enemies on same hex or adjacent */
+        const foes = this.units.filter(v =>
+            !v.dead && v.team !== u.team &&
+            (v.c===u.c && v.r===u.r ||
+             ns.some(([c,r]) => v.c===c && v.r===r))
+        );
+
+        if (foes.length > 0) {
+            /* Fight */
+            u.atkT += dt;
+            if (u.atkT >= 1100) {
+                u.atkT = 0;
+                const tgt = foes.reduce((a,b) => a.hp<=b.hp ? a : b);
+                const def = UDEFS[u.type];
+                let dmg = u.atk;
+                if      (def.beats === tgt.type) dmg = Math.round(dmg * 1.6);
+                else if (def.loses === tgt.type) dmg = Math.round(dmg * 0.6);
+                dmg += Phaser.Math.Between(-2, 3);
+                tgt.hp -= dmg;
+                if (tgt.hp <= 0) tgt.dead = true;
+
+                /* Damage number */
+                this.showDmg(tgt.x, tgt.y, dmg, tgt.team);
+            }
+        } else {
+            /* Move forward (no retreat) */
+            u.mvT += dt;
+            if (u.mvT >= u.spd) {
+                u.mvT = 0;
+                const curD = dm[this.k(u.c, u.r)] ?? 999;
+
+                /* Only forward hexes (reduce distance to enemy base) */
+                let fwd = ns.filter(([c,r]) => (dm[this.k(c,r)] ?? 999) < curD);
+                /* If truly stuck, allow sideways (distance equal), never backward */
+                if (!fwd.length)
+                    fwd = ns.filter(([c,r]) => (dm[this.k(c,r)] ?? 999) <= curD);
+                if (!fwd.length) fwd = ns; // last resort
+
+                /* Prefer less-crowded forward hexes, avoid hexes with enemies */
+                fwd = fwd.filter(([c,r]) =>
+                    !this.units.some(v => !v.dead && v.team!==u.team && v.c===c && v.r===r)
+                );
+                if (!fwd.length) return; // blocked by enemy wall, stay and fight next tick
+
+                fwd.sort(([c1,r1],[c2,r2]) => {
+                    const d1 = dm[this.k(c1,r1)] ?? 999;
+                    const d2 = dm[this.k(c2,r2)] ?? 999;
+                    const cr1 = this.units.filter(v => !v.dead && v.c===c1 && v.r===r1 && v.team===u.team).length;
+                    const cr2 = this.units.filter(v => !v.dead && v.c===c2 && v.r===r2 && v.team===u.team).length;
+                    return (d1 + cr1*0.5) - (d2 + cr2*0.5);
+                });
+
+                const [nc, nr] = fwd[0];
+                u.c = nc; u.r = nr;
+
+                /* Fortress capture */
+                if (this.forts.some(f => f.c===nc && f.r===nr)) {
+                    const prev = this.hexOwner[this.k(nc, nr)];
+                    if (prev !== u.team) {
+                        this.hexOwner[this.k(nc, nr)] = u.team;
+                        this.dirty = true;
+                        this.showCapture(nc, nr, u.team);
+                    }
+                }
+            }
+        }
+
+        /* Smooth visual position */
+        const {x,y} = h2p(u.c, u.r);
+        const sh  = this.units.filter(v => !v.dead && v.c===u.c && v.r===u.r);
+        const idx = sh.indexOf(u), tot = sh.length;
+        const ang  = tot > 1 ? (idx / tot) * Math.PI * 2 : 0;
+        const offR = tot > 1 ? Math.min(9, SZ * 0.28) : 0;
+        u.x += (x + Math.cos(ang)*offR - u.x) * 0.22;
+        u.y += (y + Math.sin(ang)*offR - u.y) * 0.22;
+    }
+
+    /* ── Render units ──────────────────────────────────── */
+    renderUnits() {
+        this.gUnit.clear();
+        this.gHp.clear();
+
+        this.units.forEach(u => {
+            if (u.dead) return;
+            const r   = UDEFS[u.type].r;
+            const fc  = u.team==='player' ? 0x1a3a88 : 0x881818;
+            const rim = u.team==='player' ? 0x5588ff : 0xff5555;
+
+            this.gUnit.fillStyle(fc, 1);
+            this.gUnit.fillCircle(u.x, u.y, r);
+            this.gUnit.lineStyle(2, rim, 1);
+            this.gUnit.strokeCircle(u.x, u.y, r);
+
+            /* Type color ring */
+            this.gUnit.lineStyle(1.5, UDEFS[u.type].clr, 0.7);
+            this.gUnit.strokeCircle(u.x, u.y, r-2.5);
+
+            /* HP bar */
+            const ratio = Math.max(0, u.hp / u.maxHp);
+            this.gHp.fillStyle(0x111111, 0.85);
+            this.gHp.fillRect(u.x-r, u.y-r-5, r*2, 3);
+            const hc = ratio>0.6 ? 0x44ee44 : ratio>0.3 ? 0xffee22 : 0xee2222;
+            this.gHp.fillStyle(hc, 1);
+            this.gHp.fillRect(u.x-r, u.y-r-5, r*2*ratio, 3);
+
+            u.lbl.setPosition(u.x, u.y);
+        });
+    }
+
+    /* ── Floating damage numbers ───────────────────────── */
+    showDmg(x, y, dmg, team) {
+        const t = this.add.text(x, y-14, `-${dmg}`, {
+            fontSize:'11px',
+            color: team==='player' ? '#ff8888' : '#ffdd44',
+            fontStyle:'bold'
+        }).setOrigin(0.5, 1).setDepth(10);
+        this.tweens.add({
+            targets: t, y: y-40, alpha:0,
+            duration:700, ease:'Power1',
+            onComplete: () => t.destroy()
+        });
+    }
+
+    /* ── Fortress capture notification ─────────────────── */
+    showCapture(c, r, team) {
+        const {x,y} = h2p(c, r);
+        const msg = team==='player' ? '★占領要塞!' : '★失去要塞!';
+        const col = team==='player' ? '#88ffcc' : '#ff8888';
+        const t = this.add.text(W/2, y-30, msg, {
+            fontSize:'14px', color:col, fontStyle:'bold'
+        }).setOrigin(0.5, 1).setDepth(10);
+        this.tweens.add({
+            targets:t, y:y-60, alpha:0,
+            duration:1200, ease:'Power1',
+            onComplete:()=>t.destroy()
+        });
+    }
+
+    /* ── AI ────────────────────────────────────────────── */
+    aiSpawn() {
+        /* Count player units */
+        const pc = { cavalry:0, archer:0, infantry:0 };
+        this.units.filter(u => !u.dead && u.team==='player').forEach(u => pc[u.type]++);
+
+        /* Pick counter type */
+        let pick = 'infantry';
+        if      (pc.cavalry  >= pc.archer && pc.cavalry  >= pc.infantry) pick = 'archer';
+        else if (pc.infantry >= pc.archer)                                pick = 'cavalry';
+        else                                                               pick = 'infantry';
+
+        const cost = UDEFS[pick].cost;
+        if (this.aiGold >= cost) {
+            this.aiGold -= cost;
+            this.spawn('enemy', pick);
+        }
+    }
+
+    /* ── End game ──────────────────────────────────────── */
+    endGame(won) {
+        if (this.over) return;
+        this.over = true;
+
+        const ov = this.add.graphics().setDepth(12);
+        ov.fillStyle(0x000000, 0.75);
+        ov.fillRect(0, 0, W, H);
+
+        this.add.text(W/2, H/2-90,
+            won ? '🎉 勝利！' : '💀 失敗！',
+            { fontSize:'52px', color: won ? '#88ff44' : '#ff4444', fontStyle:'bold' }
+        ).setOrigin(0.5, 0.5).setDepth(13);
+
+        this.add.text(W/2, H/2-20,
+            won ? '你占領了敵方基地！' : '敵人占領了你的基地！',
+            { fontSize:'20px', color:'#ffffff' }
+        ).setOrigin(0.5, 0.5).setDepth(13);
+
+        /* Stats */
+        const pAlive = this.units.filter(u => !u.dead && u.team==='player').length;
+        const eAlive = this.units.filter(u => !u.dead && u.team==='enemy').length;
+        this.add.text(W/2, H/2+30,
+            `存活兵力  我方:${pAlive}  敵方:${eAlive}`,
+            { fontSize:'14px', color:'#aabbcc' }
+        ).setOrigin(0.5, 0.5).setDepth(13);
+
+        const btn = this.add.text(W/2, H/2+100, '  再來一局  ', {
+            fontSize:'24px', color:'#ffffff',
+            backgroundColor:'#1a3a5a', padding:{x:24, y:12}
+        }).setOrigin(0.5, 0.5).setInteractive().setDepth(13);
+        btn.on('pointerdown', () => this.scene.restart());
+    }
+
+    update() {}
+}
+
+/* ─── Boot / Start Scene ─────────────────────────────── */
+class StartScene extends Phaser.Scene {
+    constructor() { super('Start'); }
+    create() {
+        this.cameras.main.setBackgroundColor('#060c14');
+
+        this.add.text(W/2, 160, '六邊形戰閃電戰', {
+            fontSize:'28px', color:'#aaddff', fontStyle:'bold'
+        }).setOrigin(0.5, 0.5);
+
+        this.add.text(W/2, 220,
+            '在六邊形網格上進行即時戰略對戰\n占領中央要塞，消滅敵方基地！',
+            { fontSize:'14px', color:'#778899', align:'center', lineSpacing:6 }
+        ).setOrigin(0.5, 0.5);
+
+        const rules = [
+            '⚔  騎兵  克制步兵   被弓箭手剋制',
+            '🗡  步兵  克制弓箭手 被騎兵剋制',
+            '🏹  弓箭手克制騎兵   被步兵剋制',
+            '',
+            '★  占領要塞 = 每秒額外金幣',
+            '●  兵種前進中不能後退',
+            '●  點擊右下角基地部署兵種',
+        ];
+
+        rules.forEach((r, i) => {
+            this.add.text(W/2, 320 + i*34, r, {
+                fontSize:'13px', color: i<3 ? '#99ddaa' : '#556677', align:'center'
+            }).setOrigin(0.5, 0.5);
+        });
+
+        const btn = this.add.text(W/2, 590, '  開始遊戲  ', {
+            fontSize:'26px', color:'#ffffff',
+            backgroundColor:'#1a4a2a', padding:{x:28, y:14}
+        }).setOrigin(0.5, 0.5).setInteractive();
+        btn.on('pointerdown', () => this.scene.start('Game'));
+
+        /* Pulse animation */
+        this.tweens.add({
+            targets: btn, scaleX:1.05, scaleY:1.05,
+            duration:800, yoyo:true, repeat:-1, ease:'Sine.easeInOut'
+        });
+
+        this.add.text(W/2, H-30,
+            '瀏覽器直接測試 | Phaser 3',
+            { fontSize:'10px', color:'#334455' }
+        ).setOrigin(0.5, 0.5);
+    }
+}
+
+/* ─── Phaser init ────────────────────────────────────── */
+new Phaser.Game({
+    type: Phaser.AUTO,
+    width: W, height: H,
+    backgroundColor: '#060c14',
+    scene: [StartScene, GameScene],
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+    },
+});
+</script>
+</body>
+</html>
