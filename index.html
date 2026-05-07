@@ -110,36 +110,60 @@ class GameScene extends Phaser.Scene {
         this.dE = bfs(this.EB.c, this.EB.r);   // dist to enemy base
         this.dP = bfs(this.PB.c, this.PB.r);   // dist to player base
 
-        /* Directed hexes: unit on hex is forced to move to [tc, tr] */
-        this.directed = {};
-        this.forts.forEach(f => {               // fortresses point up (row-1) by default
-            this.directed[`${f.c},${f.r}`] = [f.c, f.r - 1];
-        });
-        // Fixed targets for (1,2) and (5,2) → both point to (3,1)
-        this.directed['1,2'] = [3, 1];
-        this.directed['5,2'] = [3, 1];
-        this.directed[`${this.EB.c},${this.EB.r}`] = [1, 0];   // (0,0) → (1,0)
-        this.directed[`${this.PB.c},${this.PB.r}`] = [5, 10];  // (6,11) → (5,10)
-        this.directed['5,10'] = [4, 10];                        // (5,10) → (4,10)
+        /* ── Player arrow map (arrowP) ── */
+        this.arrowP = {};
+        this.forts.forEach(f => { this.arrowP[`${f.c},${f.r}`] = [f.c, f.r - 1]; }); // up
+        this.arrowP['1,2'] = [3, 1];
+        this.arrowP['5,2'] = [3, 1];
+        // (3,1) is the topmost clickable fortress — point it toward the enemy base
+        {
+            const {x:fx, y:fy} = h2p(3, 1);
+            const {x:tx, y:ty} = h2p(this.EB.c, this.EB.r);
+            const [nc, nr] = stepInDir(3, 1, Math.atan2(ty-fy, tx-fx));
+            if (nc>=0 && nc<COLS && nr>=0 && nr<ROWS) this.arrowP['3,1'] = [nc, nr];
+        }
+        // NOTE: no arrowP[EB] — player units at EB trigger win condition
+        this.arrowP[`${this.PB.c},${this.PB.r}`] = [5, 10]; // spawn direction only
 
-        /* For each fortress: pre-compute up to 2 nearest FORWARD fortresses (row < self).
-           Clicking cycles: up(default) → nearest fort → 2nd nearest → back to up */
-        this.fortOptions = {};  // k -> [[c,r], ...]
-        this.fortCurr    = {};  // k -> 0=up, 1=opt[0], 2=opt[1]
+        /* ── Enemy arrow map (arrowE) — three explicit lanes ── */
+        this.arrowE = {};
+        // Left lane: 1,2 → 1,4 → 1,6 → 1,8 → 2,9 → 3,9(fort) → 4,10 → (stepInDir to PB)
+        this.arrowE['1,2'] = [1, 4];
+        this.arrowE['1,4'] = [1, 6];
+        this.arrowE['1,6'] = [1, 8];
+        this.arrowE['1,8'] = [2, 9];
+        this.arrowE['2,9'] = [3, 9];   // guide to center fort
+        // Center lane: 3,5 → 3,9 → 4,10
+        this.arrowE['3,5'] = [3, 9];
+        this.arrowE['3,9'] = [4, 10];
+        this.arrowE['4,10'] = [5, 10]; // guide toward PB
+        this.arrowE['5,10'] = [6, 11]; // arrive at PB
+        // Right lane: 5,2 → 5,4 → 5,6 → 5,8 → 4,9 → 3,9(fort) → 4,10 → 5,10 → 6,11(PB)
+        this.arrowE['5,2'] = [5, 4];
+        this.arrowE['5,4'] = [5, 6];
+        this.arrowE['5,6'] = [5, 8];
+        this.arrowE['5,8'] = [4, 9];   // merge toward center
+        this.arrowE['4,9'] = [3, 9];   // center fort
+        // Junction (3,1) starts pointing at left lane; rotated by AI timer
+        this.aiLane = 0; // 0=left, 1=center, 2=right
+        this.aiLaneT = 0;
+        this.arrowE['3,1'] = [1, 2];
+        this.arrowE[`${this.EB.c},${this.EB.r}`] = [1, 0];
+        this.arrowE['1,0'] = [3, 1]; // EB exit → junction
+        // NOTE: no arrowE[PB] — enemy units at PB trigger win condition
+
+        /* ── Player fortress click options ── */
+        this.fortOptP = {};   // k -> [[c,r], ...]
+        this.fortCurrP = {};  // k -> 0=up, 1=opt[0], 2=opt[1]
         this.forts.forEach(f => {
             const k = this.k(f.c, f.r);
-            const {x: fx, y: fy} = h2p(f.c, f.r);
+            const {x:fx, y:fy} = h2p(f.c, f.r);
             const opts = this.forts
-                .filter(g => g.r < f.r)   // forward only (smaller row = closer to top)
-                .map(g => {
-                    const {x:gx, y:gy} = h2p(g.c, g.r);
-                    return { pos:[g.c, g.r], d:Math.hypot(gx-fx, gy-fy) };
-                })
-                .sort((a,b) => a.d - b.d)
-                .slice(0, 2)
-                .map(g => g.pos);
-            this.fortOptions[k] = opts;
-            this.fortCurr[k]    = 0;      // 0 = default "up"
+                .filter(g => g.r < f.r)
+                .map(g => { const {x:gx,y:gy}=h2p(g.c,g.r); return {pos:[g.c,g.r],d:Math.hypot(gx-fx,gy-fy)}; })
+                .sort((a,b) => a.d-b.d).slice(0,2).map(g=>g.pos);
+            this.fortOptP[k]  = opts;
+            this.fortCurrP[k] = 0;
         });
 
         /* Graphics layers */
@@ -188,23 +212,21 @@ class GameScene extends Phaser.Scene {
                 this.hexFill(x, y, SZ-1.5, fill, stroke);
 
                 /* Arrow overlay */
-                const dir = this.directed[this.k(c, r)];
-                if (dir) {
-                    const isFortHex = this.forts.some(f => f.c===c && f.r===r);
-                    const isBase    = (c===this.EB.c && r===this.EB.r) ||
-                                      (c===this.PB.c && r===this.PB.r) ||
-                                      (c===5 && r===10);   // relay hex
-                    if (isBase) {
-                        // Base / relay arrows always visible in white
-                        this.drawArrow(x, y, ...h2p(dir[0], dir[1]), 0xffffff);
-                    } else if (isFortHex) {
-                        // Fortress arrows only shown when captured
-                        if (ow === 'player' || ow === 'enemy') {
-                            const FIXED = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
-                            const isFixed = FIXED.some(([fc,fr]) => fc===c && fr===r);
-                            const arrColor = isFixed ? 0x778899 : 0xffee55;
-                            const {x:tx, y:ty} = h2p(dir[0], dir[1]);
-                            this.drawArrow(x, y, tx, ty, arrColor);
+                const FIXED = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
+                const isBase = (c===this.EB.c&&r===this.EB.r)||(c===this.PB.c&&r===this.PB.r);
+
+                if (isBase) {
+                    // Base / relay: single white arrow from player map
+                    const dp = this.arrowP[this.k(c,r)];
+                    if (dp) { const {x:tx,y:ty}=h2p(dp[0],dp[1]); this.drawArrow(x,y,tx,ty,0xffffff,0); }
+                } else if (isFort) {
+                    const isFixed = FIXED.some(([fc,fr])=>fc===c&&fr===r);
+                    // Player arrow (left-offset) — only if player owns fortress
+                    if (ow==='player') {
+                        const dp = this.arrowP[this.k(c,r)];
+                        if (dp) {
+                            const {x:tx,y:ty}=h2p(dp[0],dp[1]);
+                            this.drawArrow(x-5,y,tx,ty, isFixed?0x778899:0xffee55, 0);
                         }
                     }
                 }
@@ -217,12 +239,12 @@ class GameScene extends Phaser.Scene {
         const dx  = tx - fx, dy = ty - fy;
         const len = Math.sqrt(dx*dx + dy*dy);
         const nx  = dx/len, ny = dy/len;
-        const hs  = SZ * 0.48;                  // shaft half-length
+        const hs  = SZ * 0.82;                  // shaft half-length
         const sx  = fx - nx*hs*0.15, sy = fy - ny*hs*0.15;
         const ex  = fx + nx*hs,      ey = fy + ny*hs;
-        g.lineStyle(2, color, 0.85);
+        g.lineStyle(3, color, 0.92);
         g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.strokePath();
-        const hw = 5, hl = 7;
+        const hw = 7, hl = 9;
         const px = -ny, py = nx;
         g.fillStyle(color, 0.85);
         g.beginPath();
@@ -240,21 +262,6 @@ class GameScene extends Phaser.Scene {
         this.dirty = true;
         this.showCapture(nc, nr, team);
 
-        /* (3,1) and (3,8): arrow flips toward player base when enemy captures,
-           reverts to pointing up when player recaptures */
-        if (k === '3,1' || k === '3,8') {
-            if (team === 'enemy') {
-                const {x: fx, y: fy} = h2p(nc, nr);
-                const {x: tx, y: ty} = h2p(this.PB.c, this.PB.r);
-                const angle = Math.atan2(ty - fy, tx - fx);
-                const [dc, dr] = stepInDir(nc, nr, angle);
-                if (dc >= 0 && dc < COLS && dr >= 0 && dr < ROWS)
-                    this.directed[k] = [dc, dr];
-            } else {
-                this.directed[k] = [nc, nr - 1]; // back to default up
-            }
-            this.dirty = true;
-        }
     }
 
     hexFill(cx, cy, r, fill, stroke) {
@@ -417,17 +424,16 @@ class GameScene extends Phaser.Scene {
     }
 
     onFortClick(c, r) {
-        // Fixed-route fortresses — not clickable
-        const fixed = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
-        if (fixed.some(([fc,fr]) => fc===c && fr===r)) return;
+        const FIXED = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
+        if (FIXED.some(([fc,fr]) => fc===c && fr===r)) return;
         const k = this.k(c, r);
-        const opts = this.fortOptions[k] || [];
-        if (!opts.length) return;                      // topmost forts, nothing to change
-        const total = opts.length + 1;                 // 0=up, 1=opt[0], 2=opt[1]
-        this.fortCurr[k] = (this.fortCurr[k] + 1) % total;
-        this.directed[k] = this.fortCurr[k] === 0
-            ? [c, r - 1]                               // back to default "up"
-            : opts[this.fortCurr[k] - 1];             // point to nearest/2nd fort
+        const opts = this.fortOptP[k] || [];
+        if (!opts.length) return;
+        const total = opts.length + 1;
+        this.fortCurrP[k] = (this.fortCurrP[k] + 1) % total;
+        this.arrowP[k] = this.fortCurrP[k] === 0
+            ? [c, r - 1]
+            : opts[this.fortCurrP[k] - 1];
         this.dirty = true;
     }
 
@@ -447,7 +453,7 @@ class GameScene extends Phaser.Scene {
             id:uid++, team, type,
             hp:def.hp, maxHp:def.hp, atk:def.atk, spd:def.spd,
             c:base.c, r:base.r, x, y,
-            mvT:0, atkT:0, dead:false, dir:null,
+            mvT:0, atkT:0, bleedTick:0, dead:false, dir:null, visitedForts:new Set(),
             gfx: this.add.graphics().setDepth(2),
             hpg: this.add.graphics().setDepth(3),
             lbl: this.add.text(x, y, def.ch, {
@@ -486,12 +492,48 @@ class GameScene extends Phaser.Scene {
             this.aiGold = Math.min(this.aiGold + ef*6, 200);
         }
 
+        /* AI lane rotation every 7s */
+        this.aiLaneT += dt;
+        if (this.aiLaneT >= 7000) {
+            this.aiLaneT = 0;
+            this.aiLane = (this.aiLane + 1) % 3;
+            const laneTargets = [[1,2],[3,5],[5,2]];
+            this.arrowE['3,1'] = laneTargets[this.aiLane];
+        }
+
+        /* Player auto-spawn when gold is enough */
+        this.playerSpawnT = (this.playerSpawnT || 0) + dt;
+        if (this.playerSpawnT >= 800) {
+            this.playerSpawnT = 0;
+            const cost = UDEFS[this.sel].cost;
+            if (this.gold >= cost) {
+                this.gold -= cost;
+                this.spawn('player', this.sel);
+            }
+        }
+
         /* AI spawn */
         this.aiT += dt;
         if (this.aiT >= 2800) { this.aiT = 0; this.aiSpawn(); }
 
         /* Update all units */
         this.units.forEach(u => { if (!u.dead) this.updateUnit(u, dt); });
+
+        /* Merge same-team units on same hex — no HP cap */
+        for (let i = 0; i < this.units.length; i++) {
+            const u = this.units[i]; if (u.dead) continue;
+            for (let j = i + 1; j < this.units.length; j++) {
+                const v = this.units[j]; if (v.dead) continue;
+                if (u.team === v.team && u.type === v.type && u.c === v.c && u.r === v.r) {
+                    u.hp += v.hp;
+                    u.maxHp += v.maxHp;
+                    v.dead = true;
+                }
+            }
+        }
+
+        /* Rear-fortress bleed */
+        this.units.forEach(u => { if (!u.dead) this.applyBleed(u, dt); });
 
         /* Remove dead */
         this.units = this.units.filter(u => {
@@ -549,13 +591,14 @@ class GameScene extends Phaser.Scene {
                 u.mvT = 0;
 
                 /* Arrow hex: update direction then step to target */
-                const arr = this.directed[this.k(u.c, u.r)];
+                const arr = (u.team==='player' ? this.arrowP : this.arrowE)[this.k(u.c, u.r)];
                 if (arr) {
                     const {x: fx, y: fy} = h2p(u.c, u.r);
                     const {x: tx, y: ty} = h2p(arr[0], arr[1]);
                     u.dir = Math.atan2(ty - fy, tx - fx);
                     u.c = arr[0]; u.r = arr[1];
                     this.checkFortCapture(u.c, u.r, u.team);
+                    if (this.forts.some(f=>f.c===u.c&&f.r===u.r)) u.visitedForts.add(this.k(u.c,u.r));
                     return;
                 }
 
@@ -568,6 +611,7 @@ class GameScene extends Phaser.Scene {
                 }
                 u.c = nc; u.r = nr;
                 this.checkFortCapture(u.c, u.r, u.team);
+                if (this.forts.some(f=>f.c===u.c&&f.r===u.r)) u.visitedForts.add(this.k(u.c,u.r));
             }
         }
 
@@ -640,6 +684,29 @@ class GameScene extends Phaser.Scene {
             duration:1200, ease:'Power1',
             onComplete:()=>t.destroy()
         });
+    }
+
+
+    /* ── Rear-fortress bleed ─────────────────────────────── */
+    /* Only forts this unit personally visited that are now foe-owned count */
+    applyBleed(u, dt) {
+        const foeTeam = u.team === 'player' ? 'enemy' : 'player';
+        let bleedCount = 0;
+        u.visitedForts.forEach(k => {
+            if (this.hexOwner[k] !== foeTeam) return;
+            const [fc, fr] = k.split(',').map(Number);
+            // Rear: higher row for player, lower row for enemy
+            if (u.team === 'player' ? fr > u.r : fr < u.r) bleedCount++;
+        });
+        if (!bleedCount) { u.bleedTick = 0; return; }
+        u.bleedTick += dt;
+        if (u.bleedTick >= 1500) {
+            u.bleedTick = 0;
+            const dmg = bleedCount * 5;
+            u.hp -= dmg;
+            this.showDmg(u.x, u.y, dmg, u.team);
+            if (u.hp <= 0) u.dead = true;
+        }
     }
 
     /* ── AI ────────────────────────────────────────────── */
