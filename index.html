@@ -172,9 +172,14 @@ class GameScene extends Phaser.Scene {
         this.gUnit = this.add.graphics().setDepth(2);
         this.gHp   = this.add.graphics().setDepth(3);
 
+        this.visible = new Set();
+
         this.drawGrid();
         this.buildStaticText();
         this.buildUI();
+
+        /* Fog of war layer — added AFTER static text so same-depth fog renders on top */
+        this.gFog = this.add.graphics().setDepth(1);
 
         /* Initial units */
         this.spawn('player', 'infantry');
@@ -559,6 +564,7 @@ class GameScene extends Phaser.Scene {
         this.timerTxt.setText(`${mm}:${ss}`);
         this.timerTxt.setColor(warn ? '#ff4444' : '#eeddaa');
 
+        this.updateFog();
         this.renderUnits();
         this.goldTxt.setText(`💰 ${Math.floor(this.gold)}`);
         this.aiGoldTxt.setText(`AI💰 ${Math.floor(this.aiGold)}`);
@@ -682,6 +688,11 @@ class GameScene extends Phaser.Scene {
 
         groups.forEach(grp => {
             const rep = grp[0];
+            // Hide enemy units inside fog
+            if (rep.team === 'enemy' && !this.visible.has(`${rep.c},${rep.r}`)) {
+                grp.forEach(u => u.lbl.setVisible(false));
+                return;
+            }
             const r   = UDEFS[rep.type].r;
             const fc  = rep.team==='player' ? 0x1a3a88 : 0x881818;
             const rim = rep.team==='player' ? 0x5588ff : 0xff5555;
@@ -774,6 +785,47 @@ class GameScene extends Phaser.Scene {
             u.hp -= dmg;
             this.showDmg(u.x, u.y, dmg, u.team);
             if (u.hp <= 0) u.dead = true;
+        }
+    }
+
+    /* ── Fog of War ────────────────────────────────────── */
+    computeVisible() {
+        const vis = new Set();
+        const see = (c, r) => {
+            vis.add(`${c},${r}`);
+            for (const [nc, nr] of nbrs(c, r)) vis.add(`${nc},${nr}`);
+        };
+        // Player base always visible
+        see(this.PB.c, this.PB.r);
+        // Player-owned forts
+        this.forts.forEach(f => {
+            if (this.hexOwner[this.k(f.c, f.r)] === 'player') see(f.c, f.r);
+        });
+        // Each player unit reveals surrounding hexes
+        this.units.forEach(u => {
+            if (!u.dead && u.team === 'player') see(u.c, u.r);
+        });
+        return vis;
+    }
+
+    updateFog() {
+        this.gFog.clear();
+        this.visible = this.computeVisible();
+        for (let c = 0; c < COLS; c++) {
+            for (let r = 0; r < ROWS; r++) {
+                if (this.visible.has(`${c},${r}`)) continue;
+                const {x, y} = h2p(c, r);
+                const pts = Array.from({length:6}, (_,i) => ({
+                    x: x + (SZ - 0.5) * Math.cos(Math.PI / 3 * i),
+                    y: y + (SZ - 0.5) * Math.sin(Math.PI / 3 * i)
+                }));
+                this.gFog.fillStyle(0x020509, 0.90);
+                this.gFog.beginPath();
+                this.gFog.moveTo(pts[0].x, pts[0].y);
+                pts.slice(1).forEach(p => this.gFog.lineTo(p.x, p.y));
+                this.gFog.closePath();
+                this.gFog.fillPath();
+            }
         }
     }
 
