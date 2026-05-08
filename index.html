@@ -85,6 +85,7 @@ class GameScene extends Phaser.Scene {
 
     preload() {
         this.load.image('uiback', 'UITexture/UIBack.png');
+        this.load.image('plains', 'UITexture/Plains.png');
     }
 
     create() {
@@ -99,6 +100,11 @@ class GameScene extends Phaser.Scene {
         this.sel      = 'infantry';
         this.dirty    = true;        // redraw hex layer flag
         this.timeLeft = 300;         // 5分鐘倒計時（秒）
+
+        /* ── Settings ── */
+        this.settings = { fogEnabled: true, aiDiff: 1, showCoords: true };
+        this.settingsOpen = false;
+        this.pausedBeforeSettings = false;
 
         this.EB = { c:0,      r:0      };   // enemy base  top-left
         this.PB = { c:COLS-1, r:ROWS-1 };   // player base bottom-right
@@ -174,9 +180,11 @@ class GameScene extends Phaser.Scene {
 
         this.visible = new Set();
 
+        this.buildHexSprites();
         this.drawGrid();
         this.buildStaticText();
         this.buildUI();
+        this.buildSettingsPanel();
 
         /* Fog of war layer — added AFTER static text so same-depth fog renders on top */
         this.gFog = this.add.graphics().setDepth(1);
@@ -193,6 +201,14 @@ class GameScene extends Phaser.Scene {
     /* ── Grid ──────────────────────────────────────────── */
     drawGrid() {
         this.gHex.clear();
+        // 屏幕外延格子（純視覺，無遊戲邏輯）
+        for (let c = -1; c <= 7; c++) {
+            for (let r = -1; r <= 15; r++) {
+                if (c >= 0 && c < COLS && r >= 0 && r < ROWS) continue;
+                const {x, y} = h2p(c, r);
+                this.hexStroke(x, y, SZ-1.5, 0x5f7a8a);
+            }
+        }
         for (let c = 0; c < COLS; c++) {
             for (let r = 0; r < ROWS; r++) {
                 const {x, y} = h2p(c, r);
@@ -212,7 +228,12 @@ class GameScene extends Phaser.Scene {
                     else if (ow==='enemy')  fill = 0x6a2020;
                 }
 
-                this.hexFill(x, y, SZ-1.5, fill, stroke);
+                const isNormal = !isEB && !isPB && !isFort && !ow;
+                if (isNormal) {
+                    this.hexStroke(x, y, SZ-1.5, stroke);
+                } else {
+                    this.hexFill(x, y, SZ-1.5, fill, stroke);
+                }
 
                 /* Arrow overlay */
                 const FIXED = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
@@ -267,6 +288,32 @@ class GameScene extends Phaser.Scene {
 
     }
 
+    buildHexSprites() {
+        const hexW = SZ * 2;
+        const hexH = SZ * Math.sqrt(3);
+        // 從 c=-1..7, r=-1..15 鋪滿整個 390×780 畫布
+        for (let c = -1; c <= 7; c++) {
+            for (let r = -1; r <= 15; r++) {
+                const {x, y} = h2p(c, r);
+                this.add.image(x, y, 'plains')
+                    .setDisplaySize(hexW, hexH)
+                    .setDepth(-1);
+            }
+        }
+    }
+
+    hexStroke(cx, cy, r, stroke) {
+        const g = this.gHex;
+        const pts = Array.from({length:6}, (_,i) => ({
+            x: cx + r * Math.cos(Math.PI/3 * i),
+            y: cy + r * Math.sin(Math.PI/3 * i)
+        }));
+        g.lineStyle(1.5, stroke, 0.88);
+        g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+        pts.slice(1).forEach(p => g.lineTo(p.x, p.y));
+        g.closePath(); g.strokePath();
+    }
+
     hexFill(cx, cy, r, fill, stroke) {
         const g = this.gHex;
         const pts = Array.from({length:6}, (_,i) => ({
@@ -284,14 +331,16 @@ class GameScene extends Phaser.Scene {
     }
 
     buildStaticText() {
-        const sz7 = { fontSize:'11px', color:'#8aaabb' };
+        const sz7 = { fontSize:'12px', color:'#e8f4ff', stroke:'#000000', strokeThickness:3 };
         const sz13 = { fontSize:'13px', color:'#ffee44' };
+        this.coordLabels = [];
         for (let c = 0; c < COLS; c++) {
             for (let r = 0; r < ROWS; r++) {
                 const {x, y} = h2p(c, r);
                 // Coordinate label
-                this.add.text(x, y + SZ*0.44, `${c},${r}`, sz7)
+                const cl = this.add.text(x, y + SZ*0.44, `${c},${r}`, sz7)
                     .setOrigin(0.5, 0.5).setDepth(1);
+                this.coordLabels.push(cl);
                 // Fort star
                 if (this.forts.some(f => f.c===c && f.r===r))
                     this.add.text(x, y - 1, '★', sz13)
@@ -326,6 +375,12 @@ class GameScene extends Phaser.Scene {
             backgroundColor:'#1a2a3a', padding:{ x:10, y:4 }
         }).setOrigin(0.5, 0).setInteractive().setDepth(9);
         this.pauseLbl.on('pointerdown', () => this.togglePause());
+
+        // Settings button (top-right)
+        this.settingsBtn = this.add.text(W-8, 22, '⚙', {
+            fontSize:'17px', color:'#778899'
+        }).setOrigin(1, 0.5).setDepth(9).setInteractive();
+        this.settingsBtn.on('pointerdown', () => this.openSettings());
 
         // Pause overlay (hidden by default)
         this.pauseOverlay = this.add.graphics().setDepth(14).setVisible(false);
@@ -406,7 +461,7 @@ class GameScene extends Phaser.Scene {
 
     /* ── Input ─────────────────────────────────────────── */
     onTap(p) {
-        if (this.over || p.y >= H - UI_H) return;
+        if (this.over || this.settingsOpen || p.y >= H - UI_H) return;
         // Find nearest hex
         let best = null, bd = Infinity;
         for (let c = 0; c < COLS; c++) for (let r = 0; r < ROWS; r++) {
@@ -471,13 +526,126 @@ class GameScene extends Phaser.Scene {
 
     /* ── Pause ─────────────────────────────────────────── */
     togglePause() {
-        if (this.over) return;
+        if (this.over || this.settingsOpen) return;
         this.paused = !this.paused;
         const isPaused = this.paused;
         this.pauseOverlay.setVisible(isPaused);
         this.pauseTxt.setVisible(isPaused);
         this.resumeTxt.setVisible(isPaused);
         this.pauseLbl.setText(isPaused ? '▶ 繼續' : '⏸ 暫停');
+    }
+
+    /* ── Settings Panel ────────────────────────────────── */
+    buildSettingsPanel() {
+        this.settingsGroup = [];
+        const BX = 40, BY = 195, BW = 310, BH = 315;
+        const g = obj => { this.settingsGroup.push(obj); obj.setVisible(false); return obj; };
+
+        // Dark overlay
+        const ov = this.add.graphics().setDepth(16);
+        ov.fillStyle(0x000000, 0.72); ov.fillRect(0, 0, W, H);
+        g(ov);
+
+        // Panel background
+        const panel = this.add.graphics().setDepth(17);
+        panel.fillStyle(0x0c1820, 1);
+        panel.lineStyle(2, 0x2a4a6a, 1);
+        panel.fillRoundedRect(BX, BY, BW, BH, 12);
+        panel.strokeRoundedRect(BX, BY, BW, BH, 12);
+        g(panel);
+
+        // Title
+        g(this.add.text(W/2, BY+32, '⚙  設置', {
+            fontSize:'17px', color:'#aaddff', fontStyle:'bold'
+        }).setOrigin(0.5, 0.5).setDepth(18));
+
+        // Divider under title
+        const divG = this.add.graphics().setDepth(18);
+        divG.lineStyle(1, 0x2a4a6a, 0.8);
+        divG.beginPath(); divG.moveTo(BX+16, BY+55); divG.lineTo(BX+BW-16, BY+55); divG.strokePath();
+        g(divG);
+
+        const ROW = [BY+90, BY+150, BY+210];
+        const lblStyle = { fontSize:'13px', color:'#8aaabb' };
+
+        // Row labels
+        g(this.add.text(BX+18, ROW[0], '戰爭迷霧', lblStyle).setOrigin(0, 0.5).setDepth(18));
+        g(this.add.text(BX+18, ROW[1], 'AI 難易度', lblStyle).setOrigin(0, 0.5).setDepth(18));
+        g(this.add.text(BX+18, ROW[2], '顯示座標', lblStyle).setOrigin(0, 0.5).setDepth(18));
+
+        // Fog buttons: 開 / 關
+        this.sBtnFog = ['開', '關'].map((lbl, i) => {
+            const t = this.add.text(BX+196 + i*58, ROW[0], lbl, {
+                fontSize:'13px', color:'#fff', padding:{x:14, y:6}
+            }).setOrigin(0.5, 0.5).setDepth(19).setInteractive();
+            t.on('pointerdown', () => { this.settings.fogEnabled = (i===0); if (!this.settings.fogEnabled) this.gFog.clear(); this.refreshSettingsPanel(); });
+            g(t); return t;
+        });
+
+        // AI difficulty buttons: 簡單 / 普通 / 困難
+        const diffLabels = ['簡單','普通','困難'];
+        this.sBtnDiff = diffLabels.map((lbl, i) => {
+            const t = this.add.text(BX+150 + i*58, ROW[1], lbl, {
+                fontSize:'12px', color:'#fff', padding:{x:8, y:6}
+            }).setOrigin(0.5, 0.5).setDepth(19).setInteractive();
+            t.on('pointerdown', () => { this.settings.aiDiff = i; this.refreshSettingsPanel(); });
+            g(t); return t;
+        });
+
+        // Coord buttons: 開 / 關
+        this.sBtnCoord = ['開', '關'].map((lbl, i) => {
+            const t = this.add.text(BX+196 + i*58, ROW[2], lbl, {
+                fontSize:'13px', color:'#fff', padding:{x:14, y:6}
+            }).setOrigin(0.5, 0.5).setDepth(19).setInteractive();
+            t.on('pointerdown', () => {
+                this.settings.showCoords = (i===0);
+                this.coordLabels.forEach(l => l.setVisible(this.settings.showCoords));
+                this.refreshSettingsPanel();
+            });
+            g(t); return t;
+        });
+
+        // Close button
+        const closeBtn = this.add.text(W/2, BY+BH-28, '  關  閉  ', {
+            fontSize:'14px', color:'#ffffff',
+            backgroundColor:'#1a3a5a', padding:{x:20, y:9}
+        }).setOrigin(0.5, 0.5).setDepth(19).setInteractive();
+        closeBtn.on('pointerdown', () => this.closeSettings());
+        g(closeBtn);
+
+        this.refreshSettingsPanel();
+    }
+
+    refreshSettingsPanel() {
+        this.sBtnFog.forEach((t, i) => {
+            const on = (i===0) === this.settings.fogEnabled;
+            t.setBackgroundColor(on ? '#1a4a2a' : '#1c1c2e');
+            t.setColor(on ? '#88ffaa' : '#445566');
+        });
+        this.sBtnDiff.forEach((t, i) => {
+            const on = i === this.settings.aiDiff;
+            t.setBackgroundColor(on ? '#1a2a5a' : '#1c1c2e');
+            t.setColor(on ? '#aaddff' : '#445566');
+        });
+        this.sBtnCoord.forEach((t, i) => {
+            const on = (i===0) === this.settings.showCoords;
+            t.setBackgroundColor(on ? '#1a4a2a' : '#1c1c2e');
+            t.setColor(on ? '#88ffaa' : '#445566');
+        });
+    }
+
+    openSettings() {
+        if (this.over) return;
+        this.settingsOpen = true;
+        this.pausedBeforeSettings = this.paused;
+        this.paused = true;
+        this.settingsGroup.forEach(o => o.setVisible(true));
+    }
+
+    closeSettings() {
+        this.settingsOpen = false;
+        this.paused = this.pausedBeforeSettings;
+        this.settingsGroup.forEach(o => o.setVisible(false));
     }
 
     update(time, delta) {
@@ -492,13 +660,14 @@ class GameScene extends Phaser.Scene {
         this.goldT += dt;
         if (this.goldT >= 1000) {
             this.goldT = 0;
+            const aiMult = [0.6, 1.0, 1.5][this.settings.aiDiff];
             this.gold   = Math.min(this.gold   + 10, 200);
-            this.aiGold = Math.min(this.aiGold + 10, 200);
+            this.aiGold = Math.min(this.aiGold + 10 * aiMult, 200);
             /* Fortress bonus */
             const pf = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='player').length;
             const ef = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='enemy').length;
             this.gold   = Math.min(this.gold   + pf*6, 200);
-            this.aiGold = Math.min(this.aiGold + ef*6, 200);
+            this.aiGold = Math.min(this.aiGold + ef*6 * aiMult, 200);
         }
 
         /* AI lane rotation every 7s */
@@ -521,9 +690,10 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        /* AI spawn — 每秒最多 1 個 */
+        /* AI spawn — 依難易度調整間隔 */
         this.aiT += dt;
-        if (this.aiT >= 1000) { this.aiT = 0; this.aiSpawn(); }
+        const aiInterval = [1600, 1000, 700][this.settings.aiDiff];
+        if (this.aiT >= aiInterval) { this.aiT = 0; this.aiSpawn(); }
 
         /* Update all units */
         this.units.forEach(u => { if (!u.dead) this.updateUnit(u, dt); });
@@ -810,6 +980,13 @@ class GameScene extends Phaser.Scene {
 
     updateFog() {
         this.gFog.clear();
+        if (!this.settings.fogEnabled) {
+            this.visible = new Set();
+            for (let c = 0; c < COLS; c++)
+                for (let r = 0; r < ROWS; r++)
+                    this.visible.add(`${c},${r}`);
+            return;
+        }
         this.visible = this.computeVisible();
         for (let c = 0; c < COLS; c++) {
             for (let r = 0; r < ROWS; r++) {
@@ -831,15 +1008,19 @@ class GameScene extends Phaser.Scene {
 
     /* ── AI ────────────────────────────────────────────── */
     aiSpawn() {
-        /* Count player units */
-        const pc = { cavalry:0, archer:0, infantry:0 };
-        this.units.filter(u => !u.dead && u.team==='player').forEach(u => pc[u.type]++);
-
-        /* Pick counter type */
         let pick = 'infantry';
-        if      (pc.cavalry  >= pc.archer && pc.cavalry  >= pc.infantry) pick = 'archer';
-        else if (pc.infantry >= pc.archer)                                pick = 'cavalry';
-        else                                                               pick = 'infantry';
+
+        if (this.settings.aiDiff === 0) {
+            /* Easy: always spawn infantry */
+            pick = 'infantry';
+        } else {
+            /* Normal / Hard: counter-pick */
+            const pc = { cavalry:0, archer:0, infantry:0 };
+            this.units.filter(u => !u.dead && u.team==='player').forEach(u => pc[u.type]++);
+            if      (pc.cavalry  >= pc.archer && pc.cavalry  >= pc.infantry) pick = 'archer';
+            else if (pc.infantry >= pc.archer)                                pick = 'cavalry';
+            else                                                               pick = 'infantry';
+        }
 
         const cost = UDEFS[pick].cost;
         if (this.aiGold >= cost) {
