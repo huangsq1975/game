@@ -83,6 +83,10 @@ let uid = 0;
 class GameScene extends Phaser.Scene {
     constructor() { super('Game'); }
 
+    preload() {
+        this.load.image('uiback', 'UITexture/UIBack.png');
+    }
+
     create() {
         this.units    = [];
         this.hexOwner = {};          // "c,r" -> 'player'|'enemy'
@@ -335,11 +339,8 @@ class GameScene extends Phaser.Scene {
     /* ── UI Panel ──────────────────────────────────────── */
     buildUI() {
         const py = H - UI_H;
-        const bg = this.add.graphics().setDepth(4);
-        bg.fillStyle(0x080f1a, 0.96);
-        bg.fillRect(0, py, W, UI_H);
-        bg.lineStyle(1, 0x1e2e3e, 1);
-        bg.strokeRect(0, py, W, UI_H);
+        this.add.image(W/2, py + UI_H/2, 'uiback')
+            .setDisplaySize(W, UI_H).setDepth(4);
 
         this.goldTxt = this.add.text(12, py+7, '💰 80', {
             fontSize:'15px', color:'#ffdd44', fontStyle:'bold'
