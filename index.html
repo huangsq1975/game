@@ -86,6 +86,8 @@ class GameScene extends Phaser.Scene {
     preload() {
         this.load.image('uiback', 'UITexture/UIBack.png');
         this.load.image('plains', 'UITexture/Plains.png');
+        this.load.atlas('tilesets', 'UITexture/Tilesets.png', 'config/Tilesets.json');
+        this.load.json('mapdata', 'config/map.json');
     }
 
     create() {
@@ -179,6 +181,7 @@ class GameScene extends Phaser.Scene {
         this.gHp   = this.add.graphics().setDepth(3);
 
         this.visible = new Set();
+        this.mapData = this.cache.json.get('mapdata');
 
         this.buildHexSprites();
         this.drawGrid();
@@ -291,13 +294,24 @@ class GameScene extends Phaser.Scene {
     buildHexSprites() {
         const hexW = SZ * 2;
         const hexH = SZ * Math.sqrt(3);
-        // 從 c=-1..7, r=-1..15 鋪滿整個 390×780 畫布
+        const md   = this.mapData;
+        const defTile = md && md.defaultTile;
+
         for (let c = -1; c <= 7; c++) {
             for (let r = -1; r <= 15; r++) {
                 const {x, y} = h2p(c, r);
-                this.add.image(x, y, 'plains')
-                    .setDisplaySize(hexW, hexH)
-                    .setDepth(-1);
+                const inBounds = c >= 0 && c < COLS && r >= 0 && r < ROWS;
+
+                if (inBounds && md) {
+                    const tileName = (md.tiles && md.tiles[`${c},${r}`]) || defTile;
+                    this.add.image(x, y, 'tilesets', tileName)
+                        .setDisplaySize(hexW, hexH)
+                        .setDepth(-1);
+                } else {
+                    this.add.image(x, y, 'plains')
+                        .setDisplaySize(hexW, hexH)
+                        .setDepth(-1);
+                }
             }
         }
     }
