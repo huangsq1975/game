@@ -87,10 +87,17 @@ class GameScene extends Phaser.Scene {
         this.load.image('uiback', 'UITexture/UIBack.png');
         this.load.image('plains', 'UITexture/Plains.png');
         this.load.atlas('tilesets', 'UITexture/Tilesets.png', 'config/Tilesets.json');
-        this.load.json('mapdata', 'config/map.json');
+        this.load.json('mapdata',  'config/map.json');
+        this.load.json('unitsdata', 'config/units.json');
     }
 
     create() {
+        /* ── 加載兵種配置，clr 從 hex 字串轉為整數 ── */
+        const rawUnits = this.cache.json.get('unitsdata');
+        Object.keys(rawUnits).forEach(k => {
+            UDEFS[k] = Object.assign({}, rawUnits[k], { clr: parseInt(rawUnits[k].clr, 16) });
+        });
+
         this.units    = [];
         this.hexOwner = {};          // "c,r" -> 'player'|'enemy'
         this.gold     = 80;
@@ -297,13 +304,16 @@ class GameScene extends Phaser.Scene {
         const md   = this.mapData;
         const defTile = md && md.defaultTile;
 
-        for (let c = -1; c <= 7; c++) {
-            for (let r = -1; r <= 15; r++) {
-                const {x, y} = h2p(c, r);
-                const inBounds = c >= 0 && c < COLS && r >= 0 && r < ROWS;
+        const cMin = md ? md.renderColMin : -1;
+        const cMax = md ? md.renderColMax :  7;
+        const rMin = md ? md.renderRowMin : -1;
+        const rMax = md ? md.renderRowMax : 15;
 
-                if (inBounds && md) {
-                    const tileName = (md.tiles && md.tiles[`${c},${r}`]) || defTile;
+        for (let c = cMin; c <= cMax; c++) {
+            for (let r = rMin; r <= rMax; r++) {
+                const {x, y} = h2p(c, r);
+                const tileName = (md && md.tiles && md.tiles[`${c},${r}`]) || defTile;
+                if (tileName) {
                     this.add.image(x, y, 'tilesets', tileName)
                         .setDisplaySize(hexW, hexH)
                         .setDepth(-1);
