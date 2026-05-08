@@ -15,16 +15,16 @@ const UDEFS = {
     cavalry: {
         name:'騎兵', ch:'騎', clr:0xFFAA22,
         beats:'infantry', loses:'archer',
-        spd:680, atk:18, hp:80, cost:35, r:11,
+        spd:1200, atk:18, hp:80, cost:35, r:11,
     },
     archer: {
         name:'弓箭手', ch:'弓', clr:0x33CC66,
         beats:'cavalry', loses:'infantry',
-        spd:1100, atk:24, hp:55, cost:25, r:10,
+        spd:1800, atk:24, hp:55, cost:25, r:10,
     },
     infantry: {
         name:'步兵', ch:'步', clr:0x5599EE,
         beats:'archer', loses:'cavalry',
-        spd:900, atk:14, hp:120, cost:20, r:12,
+        spd:1500, atk:14, hp:120, cost:20, r:12,
     },
 };

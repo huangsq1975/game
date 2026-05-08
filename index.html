@@ -504,9 +504,9 @@ class GameScene extends Phaser.Scene {
             this.arrowE['3,1'] = laneTargets[this.aiLane];
         }
 
-        /* Player auto-spawn when gold is enough */
+        /* Player auto-spawn — 每秒最多 1 個 */
         this.playerSpawnT = (this.playerSpawnT || 0) + dt;
-        if (this.playerSpawnT >= 800) {
+        if (this.playerSpawnT >= 1000) {
             this.playerSpawnT = 0;
             const cost = UDEFS[this.sel].cost;
             if (this.gold >= cost) {
@@ -515,25 +515,13 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        /* AI spawn */
+        /* AI spawn — 每秒最多 1 個 */
         this.aiT += dt;
-        if (this.aiT >= 2800) { this.aiT = 0; this.aiSpawn(); }
+        if (this.aiT >= 1000) { this.aiT = 0; this.aiSpawn(); }
 
         /* Update all units */
         this.units.forEach(u => { if (!u.dead) this.updateUnit(u, dt); });
 
-        /* Merge same-team units on same hex — no HP cap */
-        for (let i = 0; i < this.units.length; i++) {
-            const u = this.units[i]; if (u.dead) continue;
-            for (let j = i + 1; j < this.units.length; j++) {
-                const v = this.units[j]; if (v.dead) continue;
-                if (u.team === v.team && u.type === v.type && u.c === v.c && u.r === v.r) {
-                    u.hp += v.hp;
-                    u.maxHp += v.maxHp;
-                    v.dead = true;
-                }
-            }
-        }
 
         /* Rear-fortress bleed */
         this.units.forEach(u => { if (!u.dead) this.applyBleed(u, dt); });
@@ -657,14 +645,19 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        /* Smooth visual position */
+        /* Smooth visual position — group by team+type so same group overlaps,
+           different groups offset from each other */
         const {x,y} = h2p(u.c, u.r);
-        const sh  = this.units.filter(v => !v.dead && v.c===u.c && v.r===u.r);
-        const idx = sh.indexOf(u), tot = sh.length;
-        const ang  = tot > 1 ? (idx / tot) * Math.PI * 2 : 0;
-        const offR = tot > 1 ? Math.min(9, SZ * 0.28) : 0;
-        u.x += (x + Math.cos(ang)*offR - u.x) * 0.22;
-        u.y += (y + Math.sin(ang)*offR - u.y) * 0.22;
+        const hexUnits  = this.units.filter(v => !v.dead && v.c===u.c && v.r===u.r);
+        const groupKeys = [...new Set(hexUnits.map(v => `${v.team},${v.type}`))].sort();
+        const myKey = `${u.team},${u.type}`;
+        const gIdx  = groupKeys.indexOf(myKey);
+        const gTot  = groupKeys.length;
+        const ang   = gTot > 1 ? (gIdx / gTot) * Math.PI * 2 : 0;
+        const offR  = gTot > 1 ? Math.min(9, SZ * 0.28) : 0;
+        const lerpT = 1 - Math.pow(0.78, dt / 16);
+        u.x += (x + Math.cos(ang)*offR - u.x) * lerpT;
+        u.y += (y + Math.sin(ang)*offR - u.y) * lerpT;
     }
 
     /* ── Render units ──────────────────────────────────── */
@@ -672,30 +665,62 @@ class GameScene extends Phaser.Scene {
         this.gUnit.clear();
         this.gHp.clear();
 
+        // Hide all labels first; we only show the representative's
+        this.units.forEach(u => { if (!u.dead) u.lbl.setVisible(false); });
+
+        // Build groups: team + type + hex
+        const groups = new Map();
         this.units.forEach(u => {
             if (u.dead) return;
-            const r   = UDEFS[u.type].r;
-            const fc  = u.team==='player' ? 0x1a3a88 : 0x881818;
-            const rim = u.team==='player' ? 0x5588ff : 0xff5555;
+            const k = `${u.team},${u.type},${u.c},${u.r}`;
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push(u);
+        });
 
+        const BAR_H = 3, BAR_GAP = 1;
+
+        groups.forEach(grp => {
+            const rep = grp[0];
+            const r   = UDEFS[rep.type].r;
+            const fc  = rep.team==='player' ? 0x1a3a88 : 0x881818;
+            const rim = rep.team==='player' ? 0x5588ff : 0xff5555;
+            const vx  = rep.x, vy = rep.y;
+
+            // Circle
             this.gUnit.fillStyle(fc, 1);
-            this.gUnit.fillCircle(u.x, u.y, r);
+            this.gUnit.fillCircle(vx, vy, r);
             this.gUnit.lineStyle(2, rim, 1);
-            this.gUnit.strokeCircle(u.x, u.y, r);
+            this.gUnit.strokeCircle(vx, vy, r);
+            this.gUnit.lineStyle(1.5, UDEFS[rep.type].clr, 0.7);
+            this.gUnit.strokeCircle(vx, vy, r - 2.5);
 
-            /* Type color ring */
-            this.gUnit.lineStyle(1.5, UDEFS[u.type].clr, 0.7);
-            this.gUnit.strokeCircle(u.x, u.y, r-2.5);
+            const count = grp.length;
 
-            /* HP bar */
-            const ratio = Math.max(0, u.hp / u.maxHp);
-            this.gHp.fillStyle(0x111111, 0.85);
-            this.gHp.fillRect(u.x-r, u.y-r-5, r*2, 3);
-            const hc = ratio>0.6 ? 0x44ee44 : ratio>0.3 ? 0xffee22 : 0xee2222;
-            this.gHp.fillStyle(hc, 1);
-            this.gHp.fillRect(u.x-r, u.y-r-5, r*2*ratio, 3);
-
-            u.lbl.setPosition(u.x, u.y);
+            if (count <= 8) {
+                // Stacked HP bars going upward, one per unit
+                grp.forEach((u, i) => {
+                    const ratio = Math.max(0, u.hp / u.maxHp);
+                    const barY  = vy - r - 5 - i * (BAR_H + BAR_GAP);
+                    this.gHp.fillStyle(0x111111, 0.85);
+                    this.gHp.fillRect(vx - r, barY, r * 2, BAR_H);
+                    const hc = ratio > 0.6 ? 0x44ee44 : ratio > 0.3 ? 0xffee22 : 0xee2222;
+                    this.gHp.fillStyle(hc, 1);
+                    this.gHp.fillRect(vx - r, barY, r * 2 * ratio, BAR_H);
+                });
+                rep.lbl.setText(UDEFS[rep.type].ch).setFontSize('11px')
+                    .setPosition(vx, vy).setVisible(true);
+            } else {
+                // > 8 units: show average HP bar + count on label
+                const avgRatio = grp.reduce((s, u) => s + u.hp / u.maxHp, 0) / count;
+                const barY = vy - r - 5;
+                this.gHp.fillStyle(0x111111, 0.85);
+                this.gHp.fillRect(vx - r, barY, r * 2, BAR_H);
+                const hc = avgRatio > 0.6 ? 0x44ee44 : avgRatio > 0.3 ? 0xffee22 : 0xee2222;
+                this.gHp.fillStyle(hc, 1);
+                this.gHp.fillRect(vx - r, barY, r * 2 * avgRatio, BAR_H);
+                rep.lbl.setText(`×${count}`).setFontSize('9px')
+                    .setPosition(vx, vy).setVisible(true);
+            }
         });
     }
 
