@@ -9,10 +9,10 @@
 body { background:#060c14; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
 canvas { display:block; touch-action:none; }
 #worldmap {
-    display:none; position:absolute; z-index:50; background:#000008;
-    /* 尺寸在 JS 中根據 Phaser canvas 動態設定 */
+    display:none; position:fixed; z-index:50; background:#000008;
+    overflow:hidden;
 }
-#worldmap canvas { width:100% !important; height:100% !important; touch-action:none; }
+#worldmap canvas { display:block; width:100%; height:100%; touch-action:none; }
 #map-btn {
     position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
     z-index:60; padding:7px 22px;
@@ -1419,25 +1419,22 @@ class WorldMap {
 
     /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
     _resize() {
-        const phaserCanvas = document.querySelector('canvas');
-        const wm = document.getElementById('worldmap');
-        if (phaserCanvas && wm.style.display === 'block') {
-            const rect = phaserCanvas.getBoundingClientRect();
-            // UI 面板高度按比例換算（Phaser 內部 UI_H / H * 渲染高度）
-            const uiRatio = GC.grid.uiHeight / GC.canvas.height;
-            const uiPx = rect.height * uiRatio;
-            const mapH = rect.height - uiPx;
-            wm.style.left   = rect.left + 'px';
-            wm.style.top    = rect.top  + 'px';
-            wm.style.width  = rect.width + 'px';
-            wm.style.height = mapH + 'px';
-            this.cv.width  = Math.round(rect.width);
-            this.cv.height = Math.round(mapH);
-        } else {
-            this.cv.width  = innerWidth;
-            this.cv.height = innerHeight;
-        }
-        this.gl.viewport(0, 0, this.cv.width, this.cv.height);
+        // 必須用 phaserGame.canvas，避免 querySelector 取到 WorldMap 自身的 canvas
+        const pc  = phaserGame.canvas;
+        const wm  = document.getElementById('worldmap');
+        const rect = pc.getBoundingClientRect();
+        // UI 面板高度按比例換算（Phaser 內部 UI_H / H * 渲染高度）
+        const uiRatio = GC.grid.uiHeight / GC.canvas.height;
+        const mapH    = Math.round(rect.height * (1 - uiRatio));
+        const mapW    = Math.round(rect.width);
+        wm.style.left   = Math.round(rect.left) + 'px';
+        wm.style.top    = Math.round(rect.top)  + 'px';
+        wm.style.width  = mapW + 'px';
+        wm.style.height = mapH + 'px';
+        // canvas 像素尺寸跟隨容器（CSS 設定 width/height:100% 做顯示縮放）
+        this.cv.width  = mapW;
+        this.cv.height = mapH;
+        this.gl.viewport(0, 0, mapW, mapH);
     }
 
     /* ═══ Show / Hide ═══════════════════════════════════════ */
