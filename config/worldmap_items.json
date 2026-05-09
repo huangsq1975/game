@@ -8,11 +8,13 @@
       "atlasFrame": { "x": 722, "y": 100, "w": 64, "h": 56 },
       "_atlasFrame": "圖集中的像素座標與尺寸",
       "landOnly":   true,
-      "_landOnly":  "只放在陸地格（地形 Perlin 高度 >= 0.50，排除海洋與海岸）",
-      "minCellGap": 2,
-      "_minCellGap": "與其他同類物品之間的最小格子距離（BFS 禁止半徑），2 = 周邊 2 格內不放其他物品",
-      "maxCount":   12,
-      "_maxCount":  "最多放置數量（不足時以實際可放數量為準）",
+      "_landOnly":  "只放在陸地格（Perlin 高度 >= 0.50，排除海洋與海岸），海洋格子不放",
+      "neighborRadius": 3,
+      "_neighborRadius": "每個放置物在此格子半徑內必須有 neighborCount 個其他放置物",
+      "neighborCount": [1, 3],
+      "_neighborCount": "合法的鄰居數量列表（1=成對，3=四元組），不符合則不放",
+      "maxPairs":   8,
+      "_maxPairs":  "最多放置的「對」數（每對2個，最終物品數 = maxPairs * 2）",
       "displaySize": { "w": 24, "h": 21 },
       "_displaySize": "在 2D overlay canvas 上繪製的像素大小"
     }

@@ -1765,44 +1765,81 @@ class WorldMap {
         catch(e){ console.warn('worldmap_items.json 讀取失敗',e); return; }
 
         const placed=[];
+        const cells=this._cellCoords, adj=this._cellAdj;
+        if(!cells||!adj) return;
+
         for(const itemDef of (cfg.items||[])){
             /* 載入圖集圖片 */
             const img=new Image();
             await new Promise(res=>{ img.onload=res; img.onerror=res; img.src=itemDef.atlasImage; });
-            const frame=itemDef.atlasFrame||{x:0,y:0,w:64,h:56};
-            const dw=(itemDef.displaySize||{}).w||24;
-            const dh=(itemDef.displaySize||{}).h||21;
-            const minGap=itemDef.minCellGap??2;     // BFS 禁止半徑
-            const maxCount=itemDef.maxCount||12;
+            const frame   = itemDef.atlasFrame||{x:0,y:0,w:64,h:56};
+            const dw      = (itemDef.displaySize||{}).w||24;
+            const dh      = (itemDef.displaySize||{}).h||21;
+            const radius  = itemDef.neighborRadius??3;  // 鄰居搜索半徑
+            const maxPairs= itemDef.maxPairs||8;
 
-            /* 篩選陸地格並打亂順序（固定種子，保證每次一致）*/
-            const cells=this._cellCoords, adj=this._cellAdj;
-            if(!cells||!adj) continue;
-            const landVerts=[];
+            /* BFS：取 vi 出發半徑 r 內的所有格子集合 */
+            const bfsSet=(vi,r)=>{
+                const s=new Set([vi]); const q=[[vi,0]]; let h=0;
+                while(h<q.length){
+                    const[cur,d]=q[h++];
+                    if(d<r) for(const nb of adj[cur]) if(!s.has(nb)){s.add(nb);q.push([nb,d+1]);}
+                }
+                return s;
+            };
+
+            /* 篩選陸地格（海洋排除：_isLandCell 使用 Perlin 高度 >= 0.50）*/
+            const landSet=new Set();
             for(let vi=0;vi<cells.length;vi++){
-                if(cells[vi]&&this._isLandCell(vi)) landVerts.push(vi);
+                if(cells[vi]&&this._isLandCell(vi)) landSet.add(vi);
             }
+
+            /* 打亂陸地格順序（固定種子）*/
+            const landArr=[...landSet];
             let _rs=0xdeadbeef>>>0;
             const rs=()=>{_rs^=_rs<<13;_rs^=_rs>>17;_rs^=_rs<<5;return(_rs>>>0)/0x100000000;};
-            for(let i=landVerts.length-1;i>0;i--){
+            for(let i=landArr.length-1;i>0;i--){
                 const j=Math.floor(rs()*(i+1));
-                [landVerts[i],landVerts[j]]=[landVerts[j],landVerts[i]];
+                [landArr[i],landArr[j]]=[landArr[j],landArr[i]];
             }
 
-            /* 貪婪放置：BFS 標記禁止區 */
+            /* 貪婪成對放置
+             * 規則：每個放置物在 radius 格內恰好有 1 個（成對）或 3 個（四元組）同類。
+             * 實作「成對」策略：
+             *   1. 找格子 A（非禁止、為陸地）
+             *   2. 在 A 的 radius 格內找陸地格 B（非禁止）作為搭檔
+             *   3. 放置 A 和 B
+             *   4. 將 A 和 B 各自 radius 格範圍全部標記為禁止
+             *      → 確保外部不會有第三個物品進入 A 或 B 的 radius 範圍
+             *      → A 的鄰居恰好只有 B（1個） ✓，B 的鄰居恰好只有 A（1個） ✓
+             */
             const forbidden=new Set();
-            for(const vi of landVerts){
-                if(forbidden.has(vi)) continue;
-                if(placed.filter(p=>p.tile===itemDef.tile).length>=maxCount) break;
-                placed.push({vi, tile:itemDef.tile, cen:this._cellCentroids[vi], img, frame, dw, dh});
-                /* BFS 半徑 minGap 格子設為禁止 */
-                const queue=[[vi,0]]; const seen=new Set([vi]); let head=0;
-                while(head<queue.length){
-                    const[cur,dist]=queue[head++];
-                    forbidden.add(cur);
-                    if(dist<minGap) for(const nb of adj[cur]){
-                        if(!seen.has(nb)){seen.add(nb);queue.push([nb,dist+1]);}
-                    }
+            let pairCount=0;
+
+            for(const viA of landArr){
+                if(forbidden.has(viA)||pairCount>=maxPairs) continue;
+
+                /* 在 radius 步內找未禁止的陸地格作為搭檔 */
+                const candidates=[];
+                const qc=[[viA,0]]; const vc=new Set([viA]); let hc=0;
+                while(hc<qc.length){
+                    const[cur,d]=qc[hc++];
+                    if(d>0&&landSet.has(cur)&&!forbidden.has(cur)) candidates.push(cur);
+                    if(d<radius) for(const nb of adj[cur]) if(!vc.has(nb)){vc.add(nb);qc.push([nb,d+1]);}
+                }
+                if(candidates.length===0) continue;
+
+                /* 隨機選一個搭檔 */
+                const viB=candidates[Math.floor(rs()*candidates.length)];
+
+                /* 放置這一對 */
+                const mkItem=vi=>({vi, tile:itemDef.tile, cen:this._cellCentroids[vi], img, frame, dw, dh});
+                placed.push(mkItem(viA), mkItem(viB));
+                pairCount++;
+
+                /* 禁止 A 和 B 各自 radius 格範圍（確保無其他物品侵入） */
+                for(const anchor of [viA,viB]){
+                    for(const nb of bfsSet(anchor,radius)) forbidden.add(nb);
                 }
             }
         }
