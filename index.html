@@ -1363,6 +1363,9 @@ class WorldMap {
              void main(){gl_FragColor=u_color;}`
         );
         this._icoGrid=this._mkTruncIcoGrid();
+
+        /* North-South axis line: south pole → north pole, slightly outside sphere */
+        this._axisLine=this._mkBuf(new Float32Array([0,-1.12,0, 0,1.12,0]));
     }
 
     /* ═══ Dual grid = hexagons + pentagons (Goldberg polyhedron) ══ */
@@ -1522,6 +1525,20 @@ class WorldMap {
         gl.depthMask(true);
     }
 
+    _drawAxis(mvp) {
+        const gl=this.gl,p=this._lProg;
+        gl.useProgram(p);
+        gl.depthMask(false);
+        gl.disable(gl.DEPTH_TEST);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+        this._attr(p,'a_pos',this._axisLine,3);
+        gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
+        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([1.0,0.9,0.2,0.9]));
+        gl.drawArrays(gl.LINES,0,2);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(true);
+    }
+
     /* ═══ Draw calls ════════════════════════════════════════ */
     _drawGlobe(mvp,rot) {
         const gl=this.gl,p=this._gProg,s=this._sphere;
@@ -1591,6 +1608,7 @@ class WorldMap {
         this._drawStars(PV);
         this._drawGlobe(PVR,R);
         this._drawGrid(PVR);
+        this._drawAxis(PVR);
         this._drawAtm(PV);
         this._drawLabels(PVR,R);
     }
