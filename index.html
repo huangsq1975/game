@@ -1197,6 +1197,35 @@ const phaserGame = new Phaser.Game({
     },
 });
 
+/* ─── World Map terrain tile mapping (Civ6 style) ───────── */
+const _WM_TILES = {
+    ocean:    'Tilesets/TileSets/FantasyHex/Tiles/Ocean.png',
+    coast:    'Tilesets/TileSets/FantasyHex/Tiles/Coast.png',
+    grassland:'Tilesets/TileSets/FantasyHex/Tiles/Grassland.png',
+    gforest:  'Tilesets/TileSets/FantasyHex/Tiles/GrasslandForest.png',
+    plains:   'Tilesets/TileSets/FantasyHex/Tiles/Plains.png',
+    pforest:  'Tilesets/TileSets/FantasyHex/Tiles/PlainsForest.png',
+    desert:   'Tilesets/TileSets/FantasyHex/Tiles/Desert.png',
+    tundra:   'Tilesets/TileSets/FantasyHex/Tiles/Tundra.png',
+    tforest:  'Tilesets/TileSets/FantasyHex/Tiles/TundraForest.png',
+    snow:     'Tilesets/TileSets/FantasyHex/Tiles/Snow.png',
+    mountain: 'Tilesets/TileSets/FantasyHex/Tiles/Mountain.png',
+    hill:     'Tilesets/TileSets/FantasyHex/Tiles/Hill.png',
+    jungle:   'Tilesets/TileSets/FantasyHex/Tiles/Jungle.png',
+    marsh:    'Tilesets/TileSets/FantasyHex/Tiles/Marsh.png',
+    ice:      'Tilesets/TileSets/FantasyHex/Tiles/Ice.png',
+};
+const _WM_COLORS = {
+    ocean:'#163248',    coast:'#1e6490',
+    grassland:'#3a6e30',gforest:'#254d20',
+    plains:'#9a883c',   pforest:'#647530',
+    desert:'#c0a044',   tundra:'#728060',
+    tforest:'#445e38',  snow:'#d8e8f4',
+    mountain:'#766055', hill:'#728450',
+    jungle:'#185018',   marsh:'#366055',
+    ice:'#becedd',
+};
+
 /* ─── World Map (raw WebGL, no external lib) ─────────── */
 class WorldMap {
     constructor() {
@@ -1222,6 +1251,11 @@ class WorldMap {
         document.getElementById('worldmap').appendChild(lv);
         this.lv  = lv;
         this.lctx= lv.getContext('2d');
+
+        // Tilesets atlas for Civ6-style terrain tile sprites
+        this._atlasImg = new Image();
+        this._atlasImg.src = 'UITexture/Tilesets.png';
+        this._atlasFrames = _loadSync('config/Tilesets.json').frames;
 
         this._initGL();
         this._initControls();
@@ -1414,6 +1448,7 @@ class WorldMap {
              void main(){gl_FragColor=u_color;}`
         );
         this._icoGrid=this._mkTruncIcoGrid(wmc.icoSubdivisions);
+        this._assignTerrain();
         this._tex   =this._mkTex(this._drawEarth());
 
     }
@@ -1544,54 +1579,85 @@ class WorldMap {
         return coords;
     }
 
-    /* ═══ Draw (x,y) labels on 2D overlay canvas ═══════════ */
+    /* ═══ Draw Civ6 tile sprites + labels on 2D overlay ════════ */
     _drawLabels(mvp,R){
         const cells=this._cellCoords, ctx=this.lctx;
-        if(!cells||!ctx) return;
+        if(!cells||!ctx)return;
         const W=this.lv.width, H=this.lv.height;
         ctx.clearRect(0,0,W,H);
-        ctx.textAlign='center';
-        ctx.textBaseline='middle';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
         const sel=this._selectedCell;
+        const atlas=this._atlasImg, frames=this._atlasFrames;
+        const hasAtlas=atlas&&atlas.complete&&atlas.naturalWidth>0&&frames;
+
+        const projPoly=(poly)=>poly.map(([pcx,pcy,pcz])=>{
+            const pvx=mvp[0]*pcx+mvp[4]*pcy+mvp[8]*pcz+mvp[12];
+            const pvy=mvp[1]*pcx+mvp[5]*pcy+mvp[9]*pcz+mvp[13];
+            const pvw=mvp[3]*pcx+mvp[7]*pcy+mvp[11]*pcz+mvp[15];
+            if(pvw<=0)return null;
+            return[(pvx/pvw*0.5+0.5)*W,(-pvy/pvw*0.5+0.5)*H];
+        });
+
         for(let i=0;i<cells.length;i++){
-            const cell=cells[i]; if(!cell) continue;
-            const [cx,cy,cz]=cell.cen;
+            const cell=cells[i]; if(!cell)continue;
+            const[cx,cy,cz]=cell.cen;
             const rz=R[2]*cx+R[6]*cy+R[10]*cz;
-            if(rz<0.15) continue;
+            if(rz<0.15)continue;
             const vx=mvp[0]*cx+mvp[4]*cy+mvp[8]*cz+mvp[12];
             const vy=mvp[1]*cx+mvp[5]*cy+mvp[9]*cz+mvp[13];
             const vw=mvp[3]*cx+mvp[7]*cy+mvp[11]*cz+mvp[15];
-            if(vw<=0) continue;
+            if(vw<=0)continue;
             const sx=(vx/vw*0.5+0.5)*W, sy=(-vy/vw*0.5+0.5)*H;
             const isSel=sel&&sel.x===cell.x&&sel.y===cell.y;
-            if(isSel&&cell.poly){
-                // Project polygon vertices to screen and draw cell outline
-                const pts=cell.poly.map(([pcx,pcy,pcz])=>{
-                    const pvx=mvp[0]*pcx+mvp[4]*pcy+mvp[8]*pcz+mvp[12];
-                    const pvy=mvp[1]*pcx+mvp[5]*pcy+mvp[9]*pcz+mvp[13];
-                    const pvw=mvp[3]*pcx+mvp[7]*pcy+mvp[11]*pcz+mvp[15];
-                    if(pvw<=0)return null;
-                    return[(pvx/pvw*0.5+0.5)*W, (-pvy/pvw*0.5+0.5)*H];
-                });
-                if(pts.every(p=>p!==null)){
-                    ctx.beginPath();
-                    ctx.moveTo(pts[0][0],pts[0][1]);
-                    for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k][0],pts[k][1]);
-                    ctx.closePath();
-                    ctx.strokeStyle='rgba(255,220,50,0.95)';
-                    ctx.lineWidth=2.5;
-                    ctx.stroke();
-                    ctx.fillStyle='rgba(255,220,50,0.15)';
-                    ctx.fill();
+
+            // Project polygon
+            const pts=cell.poly?projPoly(cell.poly):null;
+            const ptsOk=pts&&pts.every(p=>p!==null);
+
+            // ── Civ6 terrain tile sprite ──────────────────────────
+            if(hasAtlas&&ptsOk&&cell.terrain){
+                const fr=frames[_WM_TILES[cell.terrain]];
+                if(fr){
+                    const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);
+                    const x0=Math.min(...xs),x1=Math.max(...xs);
+                    const y0=Math.min(...ys),y1=Math.max(...ys);
+                    const cw=x1-x0, ch=y1-y0;
+                    if(cw>3&&ch>3){
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.moveTo(pts[0][0],pts[0][1]);
+                        for(let k=1;k<pts.length;k++)ctx.lineTo(pts[k][0],pts[k][1]);
+                        ctx.closePath();
+                        ctx.clip();
+                        ctx.globalAlpha=Math.min(1,(rz-0.12)*3);
+                        ctx.drawImage(atlas,fr.frame.x,fr.frame.y,fr.frame.w,fr.frame.h,
+                                      x0,y0,cw,ch);
+                        ctx.globalAlpha=1;
+                        ctx.restore();
+                    }
                 }
-                if(this.showCoords){
+            }
+
+            // ── Selected cell highlight ───────────────────────────
+            if(isSel&&ptsOk){
+                ctx.beginPath();
+                ctx.moveTo(pts[0][0],pts[0][1]);
+                for(let k=1;k<pts.length;k++)ctx.lineTo(pts[k][0],pts[k][1]);
+                ctx.closePath();
+                ctx.strokeStyle='rgba(255,220,50,0.95)';
+                ctx.lineWidth=2.5; ctx.stroke();
+                ctx.fillStyle='rgba(255,220,50,0.15)'; ctx.fill();
+            }
+
+            // ── Coordinate labels ─────────────────────────────────
+            if(this.showCoords){
+                if(isSel){
                     ctx.font='bold 9px monospace';
                     ctx.fillStyle='#ffe066';
-                    ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
+                } else {
+                    ctx.font='8px monospace';
+                    ctx.fillStyle=`rgba(255,255,80,${Math.min(1,(rz-0.1)*4)})`;
                 }
-            } else if(this.showCoords){
-                ctx.font='8px monospace';
-                ctx.fillStyle=`rgba(255,255,80,${Math.min(1,(rz-0.1)*4)})`;
                 ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
             }
         }
@@ -1816,108 +1882,84 @@ class WorldMap {
         document.getElementById('map-btn').style.display='block';
     }
 
-    /* ═══ Earth texture — procedural Perlin noise terrain ═══ */
-    _drawEarth() {
-        const W = GC.worldMap.texWidth, H = GC.worldMap.texHeight;
-        const cv = document.createElement('canvas');
-        cv.width = W; cv.height = H;
-        const ctx = cv.getContext('2d');
-
-        /* ── Seeded xorshift32 PRNG ── */
-        let _s = GC.worldMap.terrainSeed;
-        const rng01 = () => {
-            _s ^= _s << 13; _s ^= _s >> 17; _s ^= _s << 5;
-            return (_s >>> 0) / 0x100000000;
-        };
-
-        /* ── Permutation table (seeded shuffle) ── */
-        const perm = new Uint8Array(512);
-        { const p = new Uint8Array(256);
-          for (let i=0;i<256;i++) p[i]=i;
-          for (let i=255;i>0;i--){ const j=Math.floor(rng01()*(i+1)); const t=p[i];p[i]=p[j];p[j]=t; }
-          for (let i=0;i<512;i++) perm[i]=p[i&255]; }
-
-        /* ── Classic Perlin 3D ── */
-        const fade = t => t*t*t*(t*(t*6-15)+10);
-        const lerp = (a,b,t) => a+t*(b-a);
-        const G = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
-                   [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1],[1,1,0],[-1,1,0],[0,-1,1],[0,-1,-1]];
-        const n3 = (x,y,z) => {
-            const xi=Math.floor(x)&255, yi=Math.floor(y)&255, zi=Math.floor(z)&255;
-            const xf=x-Math.floor(x), yf=y-Math.floor(y), zf=z-Math.floor(z);
-            const u=fade(xf), v=fade(yf), w=fade(zf);
-            const A=perm[xi]+yi, AA=perm[A]+zi, AB=perm[A+1]+zi;
-            const B=perm[xi+1]+yi, BA=perm[B]+zi, BB=perm[B+1]+zi;
+    /* ═══ Assign Civ6-style terrain type to each hex/pent cell ═ */
+    _assignTerrain() {
+        const wmc=GC.worldMap;
+        let _s=wmc.terrainSeed;
+        const rng01=()=>{ _s^=_s<<13;_s^=_s>>17;_s^=_s<<5;return(_s>>>0)/0x100000000; };
+        const perm=new Uint8Array(512);
+        { const p=new Uint8Array(256); for(let i=0;i<256;i++)p[i]=i;
+          for(let i=255;i>0;i--){const j=Math.floor(rng01()*(i+1));const t=p[i];p[i]=p[j];p[j]=t;}
+          for(let i=0;i<512;i++)perm[i]=p[i&255]; }
+        const G=[[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+                 [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1],[1,1,0],[-1,1,0],[0,-1,1],[0,-1,-1]];
+        const fade=t=>t*t*t*(t*(t*6-15)+10),lerp=(a,b,t)=>a+t*(b-a);
+        const n3=(x,y,z)=>{
+            const xi=Math.floor(x)&255,yi=Math.floor(y)&255,zi=Math.floor(z)&255;
+            const xf=x-Math.floor(x),yf=y-Math.floor(y),zf=z-Math.floor(z);
+            const u=fade(xf),v=fade(yf),w=fade(zf);
+            const A=perm[xi]+yi,AA=perm[A]+zi,AB=perm[A+1]+zi;
+            const B=perm[xi+1]+yi,BA=perm[B]+zi,BB=perm[B+1]+zi;
             const dot=(i,dx,dy,dz)=>{const g=G[perm[i]%16];return g[0]*dx+g[1]*dy+g[2]*dz;};
-            return lerp(
-                lerp(lerp(dot(AA,xf,yf,zf),      dot(BA,xf-1,yf,zf),u),
-                     lerp(dot(AB,xf,yf-1,zf),    dot(BB,xf-1,yf-1,zf),u), v),
-                lerp(lerp(dot(AA+1,xf,yf,zf-1),  dot(BA+1,xf-1,yf,zf-1),u),
-                     lerp(dot(AB+1,xf,yf-1,zf-1),dot(BB+1,xf-1,yf-1,zf-1),u), v),
-                w);
+            return lerp(lerp(lerp(dot(AA,xf,yf,zf),dot(BA,xf-1,yf,zf),u),
+                             lerp(dot(AB,xf,yf-1,zf),dot(BB,xf-1,yf-1,zf),u),v),
+                        lerp(lerp(dot(AA+1,xf,yf,zf-1),dot(BA+1,xf-1,yf,zf-1),u),
+                             lerp(dot(AB+1,xf,yf-1,zf-1),dot(BB+1,xf-1,yf-1,zf-1),u),v),w);
         };
-
-        /* ── Fractal Brownian Motion ── */
-        const fbm = (x,y,z,oct) => {
+        const fbm=(x,y,z,oct)=>{
             let v=0,a=0.5,f=1,mx=0;
             for(let i=0;i<oct;i++){v+=n3(x*f,y*f,z*f)*a;mx+=a;a*=0.5;f*=2;}
-            return v/mx; // [-~0.5, ~0.5]
+            return v/mx;
         };
-
-        /* ── Pixel-level terrain generation ── */
-        const img = ctx.createImageData(W,H);
-        const d   = img.data;
-        const clamp = (v,lo,hi) => v<lo?lo:v>hi?hi:v;
-
-        for (let py=0;py<H;py++) {
-            const lat    = (py/H - 0.5) * Math.PI;
-            const latAbs = Math.abs(lat) / (Math.PI/2);
-            const cosLat = Math.cos(lat), sinLat = Math.sin(lat);
-
-            for (let px=0;px<W;px++) {
-                const lon = (px/W) * 2 * Math.PI;
-                const sx = cosLat*Math.cos(lon), sy=sinLat, sz=cosLat*Math.sin(lon);
-
-                const h = clamp(fbm(sx*2.2,sy*2.2,sz*2.2,7)*1.4+0.5,0,1);
-                const m = clamp(fbm(sx*2.2+8.3,sy*2.2+5.1,sz*2.2+3.7,5)*1.2+0.5,0,1);
-
-                let r,g,b;
-                if (h < 0.38) {
-                    const t=h/0.38;
-                    r=lerp(3,15,t)|0; g=lerp(15,55,t)|0; b=lerp(55,130,t)|0;
-                } else if (h < 0.46) {
-                    const t=(h-0.38)/0.08;
-                    r=lerp(15,25,t)|0; g=lerp(55,90,t)|0; b=lerp(130,165,t)|0;
-                } else if (h < 0.50) {
-                    const t=(h-0.46)/0.04;
-                    r=lerp(195,205,t)|0; g=lerp(180,170,t)|0; b=lerp(125,105,t)|0;
-                } else if (h < 0.63) {
-                    if (latAbs > 0.72)                   { r=100; g=115; b=90; }
-                    else if (latAbs<0.28 && m<0.42) { const t=(h-0.50)/0.13; r=lerp(210,195,t)|0; g=lerp(175,155,t)|0; b=lerp(95,75,t)|0; }
-                    else if (latAbs<0.28)            { r=30; g=105; b=35; }
-                    else                             { const t=(h-0.50)/0.13; r=lerp(85,100,t)|0; g=lerp(140,155,t)|0; b=lerp(55,62,t)|0; }
-                } else if (h < 0.75) {
-                    if (latAbs > 0.60)                   { r=55; g=88; b=60; }
-                    else if (latAbs<0.28 && m<0.40) { r=160; g=135; b=75; }
-                    else                             { const t=(h-0.63)/0.12; r=lerp(40,60,t)|0; g=lerp(100,118,t)|0; b=lerp(35,48,t)|0; }
-                } else if (h < 0.86) {
-                    const t=(h-0.75)/0.11;
-                    r=lerp(110,145,t)|0; g=lerp(95,125,t)|0; b=lerp(75,100,t)|0;
-                } else if (h < 0.94) {
-                    const t=(h-0.86)/0.08;
-                    r=lerp(155,200,t)|0; g=lerp(150,198,t)|0; b=lerp(145,200,t)|0;
-                } else {
-                    r=195; g=210; b=225;
-                }
-
-                const ice = clamp((latAbs-0.90)/0.10,0,1)*0.65;
-                r=lerp(r,185,ice)|0; g=lerp(g,205,ice)|0; b=lerp(b,225,ice)|0;
-
-                const i=(py*W+px)*4;
-                d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255;
-            }
+        const clamp=(v,lo,hi)=>v<lo?lo:v>hi?hi:v;
+        for(const cell of this._cellCoords){
+            if(!cell)continue;
+            const[cx,cy,cz]=cell.cen;
+            const latAbs=Math.abs(Math.asin(Math.max(-1,Math.min(1,cy))))/(Math.PI/2);
+            const h=clamp(fbm(cx*2.2,cy*2.2,cz*2.2,7)*1.4+0.5,0,1);
+            const m=clamp(fbm(cx*2.2+8.3,cy*2.2+5.1,cz*2.2+3.7,5)*1.2+0.5,0,1);
+            let t;
+            if     (h<0.35)                                 t='ocean';
+            else if(h<0.40)                                 t='coast';
+            else if(latAbs>0.88)                            t='ice';
+            else if(latAbs>0.72&&h>0.84)                   t='snow';
+            else if(latAbs>0.65)                            t='tundra';
+            else if(h>0.82)                                 t='mountain';
+            else if(h>0.65)                                 t='hill';
+            else if(h<0.44&&m>0.58&&latAbs<0.38)           t='marsh';
+            else if(latAbs<0.28&&m<0.36)                   t='desert';
+            else if(latAbs<0.30&&m>0.58&&h>0.50)           t='jungle';
+            else if(m>0.60&&latAbs<0.55)                   t='gforest';
+            else if(m>0.50&&latAbs<0.38)                   t='pforest';
+            else if(latAbs>0.55&&m>0.55)                   t='tforest';
+            else if(m>0.52)                                 t='grassland';
+            else                                            t='plains';
+            cell.terrain=t;
         }
-        ctx.putImageData(img,0,0);
+    }
+
+    /* ═══ Earth texture — Civ6 cell-polygon terrain ══════════ */
+    _drawEarth() {
+        const W=GC.worldMap.texWidth, H=GC.worldMap.texHeight;
+        const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+        const ctx=cv.getContext('2d');
+        ctx.fillStyle=_WM_COLORS.ocean; ctx.fillRect(0,0,W,H);
+        for(const cell of this._cellCoords){
+            if(!cell||!cell.poly||!cell.terrain)continue;
+            const lon0=Math.atan2(cell.cen[2],cell.cen[0]);
+            ctx.fillStyle=_WM_COLORS[cell.terrain]||_WM_COLORS.plains;
+            ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=0.8;
+            ctx.beginPath(); let first=true;
+            for(const[pcx,pcy,pcz]of cell.poly){
+                let lon=Math.atan2(pcz,pcx);
+                while(lon-lon0>Math.PI)lon-=2*Math.PI;
+                while(lon-lon0<-Math.PI)lon+=2*Math.PI;
+                const lat=Math.acos(Math.max(-1,Math.min(1,pcy)));
+                const u=((lon+Math.PI)/(2*Math.PI))*W, v=(lat/Math.PI)*H;
+                if(first){ctx.moveTo(u,v);first=false;}else ctx.lineTo(u,v);
+            }
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
         return cv;
     }
 
