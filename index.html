@@ -1827,6 +1827,7 @@ class WorldMap {
 }
 
 let _worldMap = null;
+let _scenesActiveBeforeMap = [];
 
 /* 將「世界地圖」按鈕定位在 Phaser UI 面板的底部條（兵種按鈕之下） */
 function positionMapBtn() {
@@ -1844,19 +1845,17 @@ function positionMapBtn() {
 }
 
 function toggleMap() {
-    const active = phaserGame.scene.getScenes(true);
-    const paused = phaserGame.scene.getScenes(false).filter(s => s.scene.isPaused());
     const showing = document.getElementById('worldmap').style.display === 'block';
 
     if (!showing) {
-        active.forEach(s => s.scene.pause());
+        _scenesActiveBeforeMap = phaserGame.scene.getScenes(true).slice();
+        _scenesActiveBeforeMap.forEach(s => s.scene.pause());
         if (!_worldMap) _worldMap = new WorldMap();
         _worldMap.show();
     } else {
         _worldMap.hide();
-        phaserGame.scene.getScenes(false)
-            .filter(s => !paused.includes(s))
-            .forEach(s => { try { s.scene.resume(); } catch(_){} });
+        _scenesActiveBeforeMap.forEach(s => { try { s.scene.resume(); } catch(_){} });
+        _scenesActiveBeforeMap = [];
     }
 }
 
