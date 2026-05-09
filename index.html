@@ -1337,22 +1337,21 @@ class WorldMap {
         this._icoGrid=this._mkTruncIcoGrid();
     }
 
-    /* ═══ Geodesic Grid (icosahedron + 2 subdivisions) ══════ */
+    /* ═══ Dual grid = hexagons + pentagons (Goldberg polyhedron) ══ */
     _mkTruncIcoGrid() {
         // Top-aligned icosahedron: north pole at y=+1, south pole at y=-1
         const r2=2/Math.sqrt(5), y1=1/Math.sqrt(5);
-        let verts=[[0,1,0]]; // v0 = north pole
+        let verts=[[0,1,0]];
         for(let i=0;i<5;i++) verts.push([Math.sin(2*Math.PI*i/5)*r2, y1, Math.cos(2*Math.PI*i/5)*r2]);
         for(let i=0;i<5;i++) verts.push([Math.sin((2*i+1)*Math.PI/5)*r2,-y1,Math.cos((2*i+1)*Math.PI/5)*r2]);
-        verts.push([0,-1,0]); // v11 = south pole
-        // 20 faces: top cap / upper equatorial / lower equatorial / bottom cap
+        verts.push([0,-1,0]);
         let faces=[
             [0,1,2],[0,2,3],[0,3,4],[0,4,5],[0,5,1],
             [1,2,6],[2,3,7],[3,4,8],[4,5,9],[5,1,10],
             [6,7,2],[7,8,3],[8,9,4],[9,10,5],[10,6,1],
             [11,7,6],[11,8,7],[11,9,8],[11,10,9],[11,6,10]
         ];
-        // Apply 2 levels of midpoint subdivision (project to unit sphere)
+        // 2 levels of midpoint subdivision → 162 verts, 320 triangular faces
         for(let s=0;s<2;s++){
             const nf=[],cache={};
             const mid=(i,j)=>{
@@ -1369,17 +1368,35 @@ class WorldMap {
             }
             faces=nf;
         }
-        // Assign (x,y) coords sorted by latitude→row, longitude→column
-        this._cellCoords=this._assignCellCoords(verts,faces);
-        // Collect unique edges
-        const es=new Set(),edges=[];
-        for(const[a,b,c]of faces){
-            for(const[i,j]of[[a,b],[b,c],[c,a]]){
-                const k=i<j?`${i},${j}`:`${j},${i}`;
-                if(!es.has(k)){es.add(k);edges.push([i,j]);}
-            }
-        }
-        // SLERP each edge into SEGS smooth arc segments for rendering
+        // Face centroids normalized to sphere → these become the dual polygon vertices
+        const fcens=faces.map(([a,b,c])=>{
+            const x=(verts[a][0]+verts[b][0]+verts[c][0])/3;
+            const y=(verts[a][1]+verts[b][1]+verts[c][1])/3;
+            const z=(verts[a][2]+verts[b][2]+verts[c][2])/3;
+            const l=Math.sqrt(x*x+y*y+z*z);
+            return[x/l,y/l,z/l];
+        });
+        // vertex→faces adjacency
+        const vtxF=verts.map(()=>[]);
+        faces.forEach((f,fi)=>f.forEach(vi=>vtxF[vi].push(fi)));
+        // Dual ring for each vertex: sort neighboring face-centroids by angle in tangent plane
+        const dualRings=verts.map((v,vi)=>{
+            const fList=vtxF[vi];
+            let up=[0,1,0]; if(Math.abs(v[1])>0.9) up=[1,0,0];
+            const d=v[0]*up[0]+v[1]*up[1]+v[2]*up[2];
+            let t1=[up[0]-d*v[0],up[1]-d*v[1],up[2]-d*v[2]];
+            const l1=Math.sqrt(t1[0]**2+t1[1]**2+t1[2]**2);
+            t1=[t1[0]/l1,t1[1]/l1,t1[2]/l1];
+            const t2=[v[1]*t1[2]-v[2]*t1[1],v[2]*t1[0]-v[0]*t1[2],v[0]*t1[1]-v[1]*t1[0]];
+            return fList.map(fi=>{
+                const c=fcens[fi];
+                const px=c[0]-v[0],py=c[1]-v[1],pz=c[2]-v[2];
+                return{fi,ang:Math.atan2(px*t2[0]+py*t2[1]+pz*t2[2],px*t1[0]+py*t1[1]+pz*t1[2])};
+            }).sort((a,b)=>a.ang-b.ang).map(x=>x.fi);
+        });
+        // (x,y) coords: sort vertices north→south (rows), west→east (cols)
+        this._cellCoords=this._assignCellCoords(verts);
+        // Build dual edge line buffer (blue cell boundaries)
         const slerp=(a,b,t)=>{
             let dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
             dot=Math.max(-1,Math.min(1,dot));
@@ -1391,30 +1408,27 @@ class WorldMap {
             const c=Math.cos(theta),s=Math.sin(theta);
             return[a[0]*c+nx*s,a[1]*c+ny*s,a[2]*c+nz*s];
         };
-        const SEGS=3,R=1.002,pos=[];
-        for(const[i,j]of edges){
-            for(let k=0;k<SEGS;k++){
-                const p0=slerp(verts[i],verts[j],k/SEGS);
-                const p1=slerp(verts[i],verts[j],(k+1)/SEGS);
-                pos.push(p0[0]*R,p0[1]*R,p0[2]*R,p1[0]*R,p1[1]*R,p1[2]*R);
+        const es=new Set(),SEGS=4,R=1.002,pos=[];
+        for(const ring of dualRings){
+            for(let i=0;i<ring.length;i++){
+                const ai=ring[i],bi=ring[(i+1)%ring.length];
+                const key=ai<bi?`${ai},${bi}`:`${bi},${ai}`;
+                if(es.has(key))continue; es.add(key);
+                const a=fcens[ai],b=fcens[bi];
+                for(let k=0;k<SEGS;k++){
+                    const p0=slerp(a,b,k/SEGS),p1=slerp(a,b,(k+1)/SEGS);
+                    pos.push(p0[0]*R,p0[1]*R,p0[2]*R,p1[0]*R,p1[1]*R,p1[2]*R);
+                }
             }
         }
         return{pos:this._mkBuf(new Float32Array(pos)),count:pos.length/3};
     }
 
-    /* ═══ Row/column (x,y) assignment for each cell ════════ */
-    _assignCellCoords(verts,faces){
-        // Normalized centroid of each triangular face
-        const cens=faces.map(([a,b,c])=>{
-            const x=(verts[a][0]+verts[b][0]+verts[c][0])/3;
-            const y=(verts[a][1]+verts[b][1]+verts[c][1])/3;
-            const z=(verts[a][2]+verts[b][2]+verts[c][2])/3;
-            const l=Math.sqrt(x*x+y*y+z*z);
-            return[x/l,y/l,z/l];
-        });
-        // Sort north→south (lat desc), group same latitude → rows
-        const items=cens.map((c,i)=>({i,lat:c[1],lon:Math.atan2(c[0],c[2])}))
-                        .sort((a,b)=>b.lat-a.lat);
+    /* ═══ Row/column (x,y) for each hex/pent cell (vertex) ════ */
+    _assignCellCoords(verts){
+        // Sort vertices north→south, group same latitude → rows, sort by longitude
+        const items=verts.map((v,i)=>({i,lat:v[1],lon:Math.atan2(v[0],v[2])}))
+                         .sort((a,b)=>b.lat-a.lat);
         const TOL=0.06, rows=[];
         let row=[items[0]], ref=items[0].lat;
         for(let k=1;k<items.length;k++){
@@ -1423,8 +1437,8 @@ class WorldMap {
         }
         if(row.length) rows.push(row.sort((a,b)=>a.lon-b.lon));
         // x = column (west→east), y = row (north→south)
-        const coords=new Array(faces.length);
-        rows.forEach((r,y)=>r.forEach((item,x)=>{coords[item.i]={cen:cens[item.i],x,y};}));
+        const coords=new Array(verts.length);
+        rows.forEach((r,y)=>r.forEach((item,x)=>{coords[item.i]={cen:verts[item.i],x,y};}));
         return coords;
     }
 
@@ -1434,22 +1448,20 @@ class WorldMap {
         if(!cells||!ctx) return;
         const W=this.lv.width, H=this.lv.height;
         ctx.clearRect(0,0,W,H);
-        ctx.font='7px monospace';
+        ctx.font='8px monospace';
         ctx.textAlign='center';
         ctx.textBaseline='middle';
-        for(const cell of cells){
+        for(let i=0;i<cells.length;i++){
+            const cell=cells[i]; if(!cell) continue;
             const [cx,cy,cz]=cell.cen;
-            // Rotated z: column-major R[row i, col j] = R[j*4+i]
-            // Rz component = R[2]*cx + R[6]*cy + R[10]*cz
+            // Back-face cull: Rz = R[2]*cx + R[6]*cy + R[10]*cz (column-major)
             const rz=R[2]*cx+R[6]*cy+R[10]*cz;
-            if(rz<0.15) continue; // skip back-facing and limb cells
-            // Project centroid through MVP to screen space
+            if(rz<0.15) continue;
             const vx=mvp[0]*cx+mvp[4]*cy+mvp[8]*cz+mvp[12];
             const vy=mvp[1]*cx+mvp[5]*cy+mvp[9]*cz+mvp[13];
             const vw=mvp[3]*cx+mvp[7]*cy+mvp[11]*cz+mvp[15];
             if(vw<=0) continue;
-            const sx=(vx/vw*0.5+0.5)*W;
-            const sy=(-vy/vw*0.5+0.5)*H;
+            const sx=(vx/vw*0.5+0.5)*W, sy=(-vy/vw*0.5+0.5)*H;
             ctx.fillStyle=`rgba(255,255,80,${Math.min(1,(rz-0.1)*4)})`;
             ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
         }
@@ -1462,7 +1474,7 @@ class WorldMap {
         gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
         this._attr(p,'a_pos',g.pos,3);
         gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
-        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([0.2,1.0,0.6,0.45]));
+        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([0.3,0.7,1.0,0.75]));
         gl.drawArrays(gl.LINES,0,g.count);
         gl.depthMask(true);
     }
