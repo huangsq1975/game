@@ -1,0 +1,20 @@
+{
+  "_": "世界地圖球體物品配置，每個 item 定義一種物品的放置規則",
+  "items": [
+    {
+      "tile":       "Tilesets/TileSets/HexaRealm/Tiles/Barringer Crater.png",
+      "_tile":      "Tilesets atlas 中的 frame key，對應 UITexture/Tilesets.png",
+      "atlasImage": "UITexture/Tilesets.png",
+      "atlasFrame": { "x": 722, "y": 100, "w": 64, "h": 56 },
+      "_atlasFrame": "圖集中的像素座標與尺寸",
+      "landOnly":   true,
+      "_landOnly":  "只放在陸地格（地形 Perlin 高度 >= 0.50，排除海洋與海岸）",
+      "minCellGap": 2,
+      "_minCellGap": "與其他同類物品之間的最小格子距離（BFS 禁止半徑），2 = 周邊 2 格內不放其他物品",
+      "maxCount":   12,
+      "_maxCount":  "最多放置數量（不足時以實際可放數量為準）",
+      "displaySize": { "w": 24, "h": 21 },
+      "_displaySize": "在 2D overlay canvas 上繪製的像素大小"
+    }
+  ]
+}

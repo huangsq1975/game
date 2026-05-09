@@ -1340,7 +1340,9 @@ class WorldMap {
         this.lv  = lv;
         this.lctx= lv.getContext('2d');
 
+        this._items = [];         // 球體上放置的物品（陸地格子中心列表）
         this._initGL();
+        this._loadItemConfig();   // 異步讀取物品配置並放置
         this._initControls();
         window.addEventListener('resize', () => {
             if (document.getElementById('worldmap').style.display === 'block') this._resize();
@@ -1636,6 +1638,7 @@ class WorldMap {
             adj[a].push(b,c); adj[b].push(a,c); adj[c].push(a,b);
         }
         for(let i=0;i<adj.length;i++) adj[i]=[...new Set(adj[i])];
+        this._cellAdj=adj; // 保存鄰接表供物品配置使用
         // BFS from vertex 0 (north pole [0,1,0]) → y = graph distance from pole
         const dist=new Array(verts.length).fill(-1);
         dist[0]=0;
@@ -1710,6 +1713,126 @@ class WorldMap {
                 ctx.font='8px monospace';
                 ctx.fillStyle=`rgba(255,255,80,${Math.min(1,(rz-0.1)*4)})`;
                 ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
+            }
+        }
+        this._drawItems(mvp,R);
+    }
+
+    /* ═══ World map item config: load → place → draw ═══════ */
+
+    /* 建立（或取用快取）與 _drawEarth 相同種子的 Perlin 置換表 */
+    _getTerrainPerm() {
+        if(this.__permCache) return this.__permCache;
+        let _s=GC.worldMap.terrainSeed;
+        const rng01=()=>{_s^=_s<<13;_s^=_s>>17;_s^=_s<<5;return(_s>>>0)/0x100000000;};
+        const p=new Uint8Array(256);
+        for(let i=0;i<256;i++) p[i]=i;
+        for(let i=255;i>0;i--){const j=Math.floor(rng01()*(i+1));const t=p[i];p[i]=p[j];p[j]=t;}
+        const pm=new Uint8Array(512);
+        for(let i=0;i<512;i++) pm[i]=p[i&255];
+        return (this.__permCache=pm);
+    }
+
+    /* 判斷球體格子 vi 是否為陸地（Perlin 高度 >= 0.50）*/
+    _isLandCell(vi) {
+        const [sx,sy,sz]=this._cellCentroids[vi];
+        const perm=this._getTerrainPerm();
+        const fade=t=>t*t*t*(t*(t*6-15)+10);
+        const lerp=(a,b,t)=>a+t*(b-a);
+        const G=[[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+                 [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1],[1,1,0],[-1,1,0],[0,-1,1],[0,-1,-1]];
+        const n3=(x,y,z)=>{
+            const xi=Math.floor(x)&255,yi=Math.floor(y)&255,zi=Math.floor(z)&255;
+            const xf=x-Math.floor(x),yf=y-Math.floor(y),zf=z-Math.floor(z);
+            const u=fade(xf),v=fade(yf),w=fade(zf);
+            const A=perm[xi]+yi,AA=perm[A]+zi,AB=perm[A+1]+zi;
+            const B=perm[xi+1]+yi,BA=perm[B]+zi,BB=perm[B+1]+zi;
+            const dot=(i,dx,dy,dz)=>{const g=G[perm[i]%16];return g[0]*dx+g[1]*dy+g[2]*dz;};
+            return lerp(lerp(lerp(dot(AA,xf,yf,zf),dot(BA,xf-1,yf,zf),u),
+                            lerp(dot(AB,xf,yf-1,zf),dot(BB,xf-1,yf-1,zf),u),v),
+                       lerp(lerp(dot(AA+1,xf,yf,zf-1),dot(BA+1,xf-1,yf,zf-1),u),
+                            lerp(dot(AB+1,xf,yf-1,zf-1),dot(BB+1,xf-1,yf-1,zf-1),u),v),w);
+        };
+        const fbm=(x,y,z,oct)=>{let v=0,a=0.5,f=1,mx=0;for(let i=0;i<oct;i++){v+=n3(x*f,y*f,z*f)*a;mx+=a;a*=0.5;f*=2;}return v/mx;};
+        const h=Math.max(0,Math.min(1,fbm(sx*2.2,sy*2.2,sz*2.2,7)*1.4+0.5));
+        return h>=0.50; // 0.50=沙灘以上才算陸地
+    }
+
+    /* 異步讀取 worldmap_items.json → 載入圖集 → 放置物品 */
+    async _loadItemConfig() {
+        let cfg;
+        try { cfg=await fetch('config/worldmap_items.json').then(r=>r.json()); }
+        catch(e){ console.warn('worldmap_items.json 讀取失敗',e); return; }
+
+        const placed=[];
+        for(const itemDef of (cfg.items||[])){
+            /* 載入圖集圖片 */
+            const img=new Image();
+            await new Promise(res=>{ img.onload=res; img.onerror=res; img.src=itemDef.atlasImage; });
+            const frame=itemDef.atlasFrame||{x:0,y:0,w:64,h:56};
+            const dw=(itemDef.displaySize||{}).w||24;
+            const dh=(itemDef.displaySize||{}).h||21;
+            const minGap=itemDef.minCellGap??2;     // BFS 禁止半徑
+            const maxCount=itemDef.maxCount||12;
+
+            /* 篩選陸地格並打亂順序（固定種子，保證每次一致）*/
+            const cells=this._cellCoords, adj=this._cellAdj;
+            if(!cells||!adj) continue;
+            const landVerts=[];
+            for(let vi=0;vi<cells.length;vi++){
+                if(cells[vi]&&this._isLandCell(vi)) landVerts.push(vi);
+            }
+            let _rs=0xdeadbeef>>>0;
+            const rs=()=>{_rs^=_rs<<13;_rs^=_rs>>17;_rs^=_rs<<5;return(_rs>>>0)/0x100000000;};
+            for(let i=landVerts.length-1;i>0;i--){
+                const j=Math.floor(rs()*(i+1));
+                [landVerts[i],landVerts[j]]=[landVerts[j],landVerts[i]];
+            }
+
+            /* 貪婪放置：BFS 標記禁止區 */
+            const forbidden=new Set();
+            for(const vi of landVerts){
+                if(forbidden.has(vi)) continue;
+                if(placed.filter(p=>p.tile===itemDef.tile).length>=maxCount) break;
+                placed.push({vi, tile:itemDef.tile, cen:this._cellCentroids[vi], img, frame, dw, dh});
+                /* BFS 半徑 minGap 格子設為禁止 */
+                const queue=[[vi,0]]; const seen=new Set([vi]); let head=0;
+                while(head<queue.length){
+                    const[cur,dist]=queue[head++];
+                    forbidden.add(cur);
+                    if(dist<minGap) for(const nb of adj[cur]){
+                        if(!seen.has(nb)){seen.add(nb);queue.push([nb,dist+1]);}
+                    }
+                }
+            }
+        }
+        this._items=placed;
+    }
+
+    /* 在 2D overlay 上繪製已放置的物品圖示 */
+    _drawItems(mvp,R){
+        if(!this._items.length) return;
+        const ctx=this.lctx, W=this.lv.width, H=this.lv.height;
+        for(const item of this._items){
+            const[cx,cy,cz]=item.cen;
+            const rz=R[2]*cx+R[6]*cy+R[10]*cz;
+            if(rz<0.12) continue; // 背面不繪製
+            const vx=mvp[0]*cx+mvp[4]*cy+mvp[8]*cz+mvp[12];
+            const vy=mvp[1]*cx+mvp[5]*cy+mvp[9]*cz+mvp[13];
+            const vw=mvp[3]*cx+mvp[7]*cy+mvp[11]*cz+mvp[15];
+            if(vw<=0) continue;
+            const sx=(vx/vw*0.5+0.5)*W, sy=(-vy/vw*0.5+0.5)*H;
+            /* 根據深度縮放（越遠越小）*/
+            const scale=Math.max(0.5,Math.min(1,rz));
+            const dw=item.dw*scale, dh=item.dh*scale;
+            const f=item.frame;
+            if(item.img&&item.img.complete&&item.img.naturalWidth>0){
+                ctx.drawImage(item.img,f.x,f.y,f.w,f.h, sx-dw/2,sy-dh/2, dw,dh);
+            } else {
+                /* 圖片未就緒時的備用標記 */
+                ctx.beginPath(); ctx.arc(sx,sy,4*scale,0,Math.PI*2);
+                ctx.fillStyle='rgba(255,120,40,0.85)'; ctx.fill();
+                ctx.strokeStyle='#ff6600'; ctx.lineWidth=1; ctx.stroke();
             }
         }
     }
