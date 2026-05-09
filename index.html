@@ -1319,6 +1319,79 @@ class WorldMap {
         this._sphere=this._mkSphere(64,64);
         this._stars =this._mkStars(4000);
         this._tex   =this._mkTex(this._drawEarth());
+
+        /* Truncated icosahedron grid */
+        this._lProg =this._mkProg(
+            `attribute vec3 a_pos;uniform mat4 u_mvp;
+             void main(){gl_Position=u_mvp*vec4(a_pos,1.0);}`,
+            `precision mediump float;uniform vec4 u_color;
+             void main(){gl_FragColor=u_color;}`
+        );
+        this._icoGrid=this._mkTruncIcoGrid();
+    }
+
+    /* ═══ Truncated Icosahedron Grid ═══════════════════════ */
+    _mkTruncIcoGrid() {
+        const φ = (1+Math.sqrt(5))/2;
+        // All 60 vertices: even permutations of 3 groups
+        const V=[];
+        const ep=(a,b,c)=>{ V.push([a,b,c],[b,c,a],[c,a,b]); };
+        for(const s1 of[1,-1]) for(const s2 of[1,-1]){
+            ep(0, s1, s2*3*φ);
+        }
+        for(const s1 of[1,-1]) for(const s2 of[1,-1]) for(const s3 of[1,-1]){
+            ep(s1,   s2*(2+φ), s3*2*φ);
+            ep(s1*2, s2*(1+2*φ), s3*φ);
+        }
+        // Normalize to unit sphere
+        const N=V.map(v=>{const l=Math.sqrt(v[0]**2+v[1]**2+v[2]**2);return[v[0]/l,v[1]/l,v[2]/l];});
+        // Find minimum edge length (in raw coords) to identify edges
+        let minD=Infinity;
+        for(let i=0;i<V.length;i++) for(let j=i+1;j<V.length;j++){
+            const d=Math.sqrt((V[i][0]-V[j][0])**2+(V[i][1]-V[j][1])**2+(V[i][2]-V[j][2])**2);
+            if(d<minD)minD=d;
+        }
+        // Collect all 90 edges
+        const tol=minD*0.05;
+        const edges=[];
+        for(let i=0;i<V.length;i++) for(let j=i+1;j<V.length;j++){
+            const d=Math.sqrt((V[i][0]-V[j][0])**2+(V[i][1]-V[j][1])**2+(V[i][2]-V[j][2])**2);
+            if(d<minD+tol)edges.push([i,j]);
+        }
+        // Slerp on unit sphere
+        const slerp=(a,b,t)=>{
+            let dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+            dot=Math.max(-1,Math.min(1,dot));
+            const theta=Math.acos(dot)*t;
+            const rx=b[0]-a[0]*dot, ry=b[1]-a[1]*dot, rz=b[2]-a[2]*dot;
+            const rl=Math.sqrt(rx*rx+ry*ry+rz*rz);
+            if(rl<1e-9)return a;
+            const nx=rx/rl,ny=ry/rl,nz=rz/rl;
+            const c=Math.cos(theta),s=Math.sin(theta);
+            return[a[0]*c+nx*s, a[1]*c+ny*s, a[2]*c+nz*s];
+        };
+        // Build geodesic line segments (subdivide each edge into SEGS arcs)
+        const SEGS=10, R=1.002, pos=[];
+        for(const[i,j] of edges){
+            for(let k=0;k<SEGS;k++){
+                const p0=slerp(N[i],N[j],k/SEGS);
+                const p1=slerp(N[i],N[j],(k+1)/SEGS);
+                pos.push(p0[0]*R,p0[1]*R,p0[2]*R, p1[0]*R,p1[1]*R,p1[2]*R);
+            }
+        }
+        return{pos:this._mkBuf(new Float32Array(pos)),count:pos.length/3};
+    }
+
+    _drawGrid(mvp) {
+        const gl=this.gl,p=this._lProg,g=this._icoGrid;
+        gl.useProgram(p);
+        gl.depthMask(false);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+        this._attr(p,'a_pos',g.pos,3);
+        gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
+        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([0.2,1.0,0.6,0.45]));
+        gl.drawArrays(gl.LINES,0,g.count);
+        gl.depthMask(true);
     }
 
     /* ═══ Draw calls ════════════════════════════════════════ */
@@ -1385,6 +1458,7 @@ class WorldMap {
 
         this._drawStars(PV);
         this._drawGlobe(PVR,R);
+        this._drawGrid(PVR);
         this._drawAtm(PV);
     }
 
