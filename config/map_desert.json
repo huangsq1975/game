@@ -1,0 +1,346 @@
+{
+  "cols": 7,
+  "rows": 12,
+  "renderColMin": -1,
+  "renderColMax": 7,
+  "renderRowMin": -1,
+  "renderRowMax": 15,
+  "defaultTile": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+  "tiles": {
+    "-1,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,0": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,2": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,3": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,4": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,5": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,6": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,7": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,8": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,9": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,10": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,11": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,12": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,13": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "-1,14": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopLeft.png",
+    "-1,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomLeft.png",
+    "0,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "0,0": "Tilesets/TileSets/HexaRealm/Tiles/City center.png",
+    "0,1": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "0,2": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "0,3": "Tilesets/TileSets/HexaRealm/Tiles/Mountain.png",
+    "0,4": "Tilesets/TileSets/HexaRealm/Tiles/Mountain.png",
+    "0,5": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill2.png",
+    "0,6": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill.png",
+    "0,7": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill.png",
+    "0,8": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "0,9": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "0,10": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "0,11": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "0,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "0,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "0,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "0,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "1,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "1,0": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "1,1": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "1,2": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "1,3": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "1,4": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "1,5": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "1,6": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "1,7": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "1,8": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "1,9": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "1,10": "Tilesets/TileSets/HexaRealm/Tiles/RuinsD.png",
+    "1,11": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "1,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "1,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "1,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "1,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "2,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "2,0": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "2,1": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "2,2": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill2.png",
+    "2,3": "Tilesets/TileSets/HexaRealm/Tiles/RuinsD.png",
+    "2,4": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "2,5": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "2,6": "Tilesets/TileSets/HexaRealm/Tiles/Desert3.png",
+    "2,7": "Tilesets/TileSets/HexaRealm/Tiles/RuinsD.png",
+    "2,8": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "2,9": "Tilesets/TileSets/HexaRealm/Tiles/Desert3.png",
+    "2,10": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill2.png",
+    "2,11": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "2,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "2,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "2,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "2,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "3,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "3,0": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "3,1": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "3,2": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,3": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,4": "Tilesets/TileSets/HexaRealm/Tiles/Desert3.png",
+    "3,5": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "3,6": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,7": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,8": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,9": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "3,10": "Tilesets/TileSets/HexaRealm/Tiles/Desert3.png",
+    "3,11": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "3,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "3,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "4,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "4,0": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "4,1": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "4,2": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill.png",
+    "4,3": "Tilesets/TileSets/HexaRealm/Tiles/RuinsD.png",
+    "4,4": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "4,5": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "4,6": "Tilesets/TileSets/HexaRealm/Tiles/Desert3.png",
+    "4,7": "Tilesets/TileSets/HexaRealm/Tiles/RuinsD.png",
+    "4,8": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "4,9": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "4,10": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill2.png",
+    "4,11": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "4,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "4,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "4,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "4,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "5,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "5,0": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "5,1": "Tilesets/TileSets/HexaRealm/Tiles/RuinsD.png",
+    "5,2": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "5,3": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "5,4": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "5,5": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "5,6": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "5,7": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "5,8": "Tilesets/TileSets/HexaRealm/Tiles/Oasis.png",
+    "5,9": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "5,10": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "5,11": "Tilesets/TileSets/HexaRealm/Tiles/Flood plains.png",
+    "5,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "5,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "5,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "5,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "6,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Top.png",
+    "6,0": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,1": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,2": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,3": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,4": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill2.png",
+    "6,5": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill.png",
+    "6,6": "Tilesets/TileSets/HexaRealm/Tiles/Desert+Hill2.png",
+    "6,7": "Tilesets/TileSets/HexaRealm/Tiles/Mountain.png",
+    "6,8": "Tilesets/TileSets/HexaRealm/Tiles/Mountain.png",
+    "6,9": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,10": "Tilesets/TileSets/HexaRealm/Tiles/Desert2.png",
+    "6,11": "Tilesets/TileSets/HexaRealm/Tiles/Citadel.png",
+    "6,12": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,13": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,14": "Tilesets/TileSets/HexaRealm/Tiles/Desert.png",
+    "6,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-Bottom.png",
+    "7,-1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,0": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,1": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,2": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,3": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,4": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,5": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,6": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,7": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,8": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,9": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,10": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,11": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,12": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,13": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png",
+    "7,14": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-TopRight.png",
+    "7,15": "Tilesets/TileSets/HexaRealm/Edges/Beach-Desert/Beach-Desert-Coast-BottomRight.png"
+  },
+  "enemyBase": {
+    "c": 0,
+    "r": 0
+  },
+  "playerBase": {
+    "c": 6,
+    "r": 11
+  },
+  "forts": [
+    {
+      "c": 3,
+      "r": 9
+    },
+    {
+      "c": 3,
+      "r": 5
+    },
+    {
+      "c": 3,
+      "r": 1
+    },
+    {
+      "c": 1,
+      "r": 8
+    },
+    {
+      "c": 1,
+      "r": 6
+    },
+    {
+      "c": 1,
+      "r": 4
+    },
+    {
+      "c": 1,
+      "r": 2
+    },
+    {
+      "c": 5,
+      "r": 8
+    },
+    {
+      "c": 5,
+      "r": 6
+    },
+    {
+      "c": 5,
+      "r": 4
+    },
+    {
+      "c": 5,
+      "r": 2
+    }
+  ],
+  "fixedForts": [
+    [
+      1,
+      8
+    ],
+    [
+      5,
+      8
+    ],
+    [
+      1,
+      4
+    ],
+    [
+      5,
+      4
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      5,
+      2
+    ]
+  ],
+  "arrowPlayerOverrides": {
+    "1,2": [
+      3,
+      1
+    ],
+    "5,2": [
+      3,
+      1
+    ],
+    "3,1": [
+      2,
+      1
+    ],
+    "6,11": [
+      5,
+      10
+    ]
+  },
+  "arrowEnemy": {
+    "0,0": [
+      1,
+      0
+    ],
+    "1,0": [
+      3,
+      1
+    ],
+    "3,1": [
+      1,
+      2
+    ],
+    "1,2": [
+      1,
+      4
+    ],
+    "1,4": [
+      1,
+      6
+    ],
+    "1,6": [
+      1,
+      8
+    ],
+    "1,8": [
+      2,
+      9
+    ],
+    "2,9": [
+      3,
+      9
+    ],
+    "3,5": [
+      3,
+      9
+    ],
+    "3,9": [
+      4,
+      10
+    ],
+    "4,10": [
+      5,
+      10
+    ],
+    "5,10": [
+      6,
+      11
+    ],
+    "5,2": [
+      5,
+      4
+    ],
+    "5,4": [
+      5,
+      6
+    ],
+    "5,6": [
+      5,
+      8
+    ],
+    "5,8": [
+      4,
+      9
+    ],
+    "4,9": [
+      3,
+      9
+    ]
+  },
+  "aiLaneTargets": [
+    [
+      1,
+      2
+    ],
+    [
+      3,
+      5
+    ],
+    [
+      5,
+      2
+    ]
+  ]
+}
