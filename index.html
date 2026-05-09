@@ -33,6 +33,12 @@ canvas { display:block; touch-action:none; }
     cursor:pointer; white-space:nowrap;
     box-shadow:0 0 14px rgba(0,100,200,0.4);
 }
+#wm-coords {
+    color:#ffe066; font-size:14px; font-family:monospace;
+    background:rgba(12,24,32,0.75); border:1px solid #4a6a2a; border-radius:8px;
+    padding:8px 20px; margin-left:16px; white-space:nowrap; min-width:90px;
+    text-align:center; letter-spacing:1px;
+}
 </style>
 </head>
 <body>
@@ -41,6 +47,7 @@ canvas { display:block; touch-action:none; }
 <div id="worldmap"></div>
 <div id="wm-ui">
     <button id="wm-back" onclick="toggleMap()">⚔ 返回戰鬥</button>
+    <span id="wm-coords"></span>
 </div>
 <button id="map-btn" onclick="toggleMap()">🌍 世界地圖</button>
 
@@ -1152,9 +1159,10 @@ const phaserGame = new Phaser.Game({
 /* ─── World Map (raw WebGL, no external lib) ─────────── */
 class WorldMap {
     constructor() {
-        this._raf  = null;
-        this._q    = [Math.cos(0.15), Math.sin(0.15), 0, 0]; // initial tilt (≈rot.x 0.3)
-        this.zoom  = 2.6;
+        this._raf          = null;
+        this._q            = [Math.cos(0.15), Math.sin(0.15), 0, 0];
+        this.zoom          = 2.6;
+        this._selectedCell = null;
         this.drag       = { on:false, lx:0, ly:0 };
         this.pinch      = 0;
         this._targetRot = null;   // target cell rotation (smooth snap)
@@ -1494,13 +1502,12 @@ class WorldMap {
         if(!cells||!ctx) return;
         const W=this.lv.width, H=this.lv.height;
         ctx.clearRect(0,0,W,H);
-        ctx.font='8px monospace';
         ctx.textAlign='center';
         ctx.textBaseline='middle';
+        const sel=this._selectedCell;
         for(let i=0;i<cells.length;i++){
             const cell=cells[i]; if(!cell) continue;
             const [cx,cy,cz]=cell.cen;
-            // Back-face cull: Rz = R[2]*cx + R[6]*cy + R[10]*cz (column-major)
             const rz=R[2]*cx+R[6]*cy+R[10]*cz;
             if(rz<0.15) continue;
             const vx=mvp[0]*cx+mvp[4]*cy+mvp[8]*cz+mvp[12];
@@ -1508,7 +1515,22 @@ class WorldMap {
             const vw=mvp[3]*cx+mvp[7]*cy+mvp[11]*cz+mvp[15];
             if(vw<=0) continue;
             const sx=(vx/vw*0.5+0.5)*W, sy=(-vy/vw*0.5+0.5)*H;
-            ctx.fillStyle=`rgba(255,255,80,${Math.min(1,(rz-0.1)*4)})`;
+            const isSel=sel&&sel.x===cell.x&&sel.y===cell.y;
+            if(isSel){
+                // Highlight ring
+                ctx.beginPath();
+                ctx.arc(sx,sy,14,0,Math.PI*2);
+                ctx.strokeStyle='rgba(255,220,50,0.9)';
+                ctx.lineWidth=2;
+                ctx.stroke();
+                ctx.fillStyle='rgba(255,220,50,0.18)';
+                ctx.fill();
+                ctx.font='bold 9px monospace';
+                ctx.fillStyle='#ffe066';
+            } else {
+                ctx.font='8px monospace';
+                ctx.fillStyle=`rgba(255,255,80,${Math.min(1,(rz-0.1)*4)})`;
+            }
             ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
         }
     }
@@ -1657,41 +1679,32 @@ class WorldMap {
         });
     }
 
-    /* ═══ Click → snap cell to screen center ════════════════ */
+    /* ═══ Click → select cell ═══════════════════════════════ */
     _handleClick(mx,my){
         const rect=this.cv.getBoundingClientRect();
         const W=this.cv.width, H=this.cv.height;
-        // CSS-pixel → canvas-pixel
         const px=(mx-rect.left)*(W/rect.width);
         const py=(my-rect.top)*(H/rect.height);
         const ndcX=(px/W)*2-1, ndcY=1-(py/H)*2;
-        // Eye-space ray direction (fov = π/4, half-fov = π/8)
         const asp=W/H, t=1/Math.tan(Math.PI/8);
         const dx=ndcX*asp/t, dy_=ndcY/t;
-        // Ray-sphere intersection: sphere at (0,0,-zoom) radius 1
-        const a=dx*dx+dy_*dy_+1;
-        const b=-2*this.zoom;
+        const a=dx*dx+dy_*dy_+1, b=-2*this.zoom;
         const D=b*b-4*a*(this.zoom*this.zoom-1);
-        if(D<0)return; // click outside sphere
+        if(D<0)return;
         const s=(-b-Math.sqrt(D))/(2*a);
-        // Hit point in eye space → model space via inverse quaternion
         const hx=s*dx, hy=s*dy_, ez=-s+this.zoom;
         const [wx,wy,wz]=this._qRotV(this._qConj(this._q),[hx,hy,ez]);
-        // Find nearest cell centroid
         const cells=this._cellCoords; if(!cells)return;
-        let best=-Infinity, bestCen=null;
+        let best=-Infinity, bestCell=null;
         for(let i=0;i<cells.length;i++){
             const c=cells[i]; if(!c)continue;
             const d=c.cen[0]*wx+c.cen[1]*wy+c.cen[2]*wz;
-            if(d>best){best=d;bestCen=c.cen;}
+            if(d>best){best=d;bestCell=c;}
         }
-        if(!bestCen)return;
-        // Quaternion that rotates bestCen → [0,0,1] (face camera)
-        const [cx,cy,cz]=bestCen;
-        const tlen=Math.sqrt((1+cz)*(1+cz)+cy*cy+cx*cx);
-        this._targetRot=tlen>1e-6
-            ?this._qNorm([1+cz,cy,-cx,0])
-            :[0,0,1,0]; // degenerate: point directly behind, flip 180° around Y
+        if(!bestCell)return;
+        this._selectedCell=bestCell;
+        const el=document.getElementById('wm-coords');
+        if(el) el.textContent=`${bestCell.x}, ${bestCell.y}`;
     }
 
     /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
