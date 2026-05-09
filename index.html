@@ -1332,51 +1332,63 @@ class WorldMap {
 
     /* ═══ Truncated Icosahedron Grid ═══════════════════════ */
     _mkTruncIcoGrid() {
-        const φ = (1+Math.sqrt(5))/2;
-        // All 60 vertices: even permutations of 3 groups
-        const V=[];
-        const ep=(a,b,c)=>{ V.push([a,b,c],[b,c,a],[c,a,b]); };
-        for(const s1 of[1,-1]) for(const s2 of[1,-1]){
-            ep(0, s1, s2*3*φ);
+        // Regular icosahedron (12 vertices, 20 triangular faces)
+        const φ=(1+Math.sqrt(5))/2;
+        let verts=[
+            [0,1,φ],[0,-1,φ],[0,1,-φ],[0,-1,-φ],
+            [1,φ,0],[-1,φ,0],[1,-φ,0],[-1,-φ,0],
+            [φ,0,1],[-φ,0,1],[φ,0,-1],[-φ,0,-1]
+        ].map(v=>{const l=Math.sqrt(v[0]**2+v[1]**2+v[2]**2);return[v[0]/l,v[1]/l,v[2]/l];});
+        let faces=[
+            [0,1,8],[0,8,4],[0,4,5],[0,5,9],[0,9,1],
+            [3,10,6],[3,6,7],[3,7,11],[3,11,2],[3,2,10],
+            [1,6,8],[8,6,10],[8,10,4],[4,10,2],[4,2,5],
+            [5,2,11],[5,11,9],[9,11,7],[9,7,1],[1,7,6]
+        ];
+        // Apply 2 levels of midpoint subdivision (project each new vertex to unit sphere)
+        for(let s=0;s<2;s++){
+            const nf=[],cache={};
+            const mid=(i,j)=>{
+                const k=i<j?`${i},${j}`:`${j},${i}`;
+                if(k in cache)return cache[k];
+                const a=verts[i],b=verts[j],v=[(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];
+                const l=Math.sqrt(v[0]**2+v[1]**2+v[2]**2);
+                verts.push([v[0]/l,v[1]/l,v[2]/l]);
+                return cache[k]=verts.length-1;
+            };
+            for(const[a,b,c]of faces){
+                const ab=mid(a,b),bc=mid(b,c),ca=mid(c,a);
+                nf.push([a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca]);
+            }
+            faces=nf;
         }
-        for(const s1 of[1,-1]) for(const s2 of[1,-1]) for(const s3 of[1,-1]){
-            ep(s1,   s2*(2+φ), s3*2*φ);
-            ep(s1*2, s2*(1+2*φ), s3*φ);
-        }
-        // Normalize to unit sphere
-        const N=V.map(v=>{const l=Math.sqrt(v[0]**2+v[1]**2+v[2]**2);return[v[0]/l,v[1]/l,v[2]/l];});
-        // Find minimum edge length (in raw coords) to identify edges
-        let minD=Infinity;
-        for(let i=0;i<V.length;i++) for(let j=i+1;j<V.length;j++){
-            const d=Math.sqrt((V[i][0]-V[j][0])**2+(V[i][1]-V[j][1])**2+(V[i][2]-V[j][2])**2);
-            if(d<minD)minD=d;
-        }
-        // Collect all 90 edges
-        const tol=minD*0.05;
-        const edges=[];
-        for(let i=0;i<V.length;i++) for(let j=i+1;j<V.length;j++){
-            const d=Math.sqrt((V[i][0]-V[j][0])**2+(V[i][1]-V[j][1])**2+(V[i][2]-V[j][2])**2);
-            if(d<minD+tol)edges.push([i,j]);
+        // Collect unique edges (480 edges after 2 subdivisions)
+        const es=new Set(),edges=[];
+        for(const[a,b,c]of faces){
+            for(const[i,j]of[[a,b],[b,c],[c,a]]){
+                const k=i<j?`${i},${j}`:`${j},${i}`;
+                if(!es.has(k)){es.add(k);edges.push([i,j]);}
+            }
         }
         // Slerp on unit sphere
         const slerp=(a,b,t)=>{
             let dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
             dot=Math.max(-1,Math.min(1,dot));
             const theta=Math.acos(dot)*t;
-            const rx=b[0]-a[0]*dot, ry=b[1]-a[1]*dot, rz=b[2]-a[2]*dot;
+            const rx=b[0]-a[0]*dot,ry=b[1]-a[1]*dot,rz=b[2]-a[2]*dot;
             const rl=Math.sqrt(rx*rx+ry*ry+rz*rz);
             if(rl<1e-9)return a;
             const nx=rx/rl,ny=ry/rl,nz=rz/rl;
             const c=Math.cos(theta),s=Math.sin(theta);
-            return[a[0]*c+nx*s, a[1]*c+ny*s, a[2]*c+nz*s];
+            return[a[0]*c+nx*s,a[1]*c+ny*s,a[2]*c+nz*s];
         };
-        // Build geodesic line segments (subdivide each edge into SEGS arcs)
-        const SEGS=10, R=1.002, pos=[];
-        for(const[i,j] of edges){
+        // Build geodesic line segments (SEGS arcs per edge)
+        const SEGS=3,R=1.002,pos=[];
+        for(const[i,j]of edges){
             for(let k=0;k<SEGS;k++){
-                const p0=slerp(N[i],N[j],k/SEGS);
-                const p1=slerp(N[i],N[j],(k+1)/SEGS);
-                pos.push(p0[0]*R,p0[1]*R,p0[2]*R, p1[0]*R,p1[1]*R,p1[2]*R);
+                const p0=slerp(verts[i],verts[j],k/SEGS);
+                const p1=slerp(verts[i],verts[j],(k+1)/SEGS);
+                pos.push(p0[0]*R,p0[1]*R,p0[2]*R,p1[0]*R,p1[1]*R,p1[2]*R);
             }
         }
         return{pos:this._mkBuf(new Float32Array(pos)),count:pos.length/3};
@@ -1689,10 +1701,11 @@ window.addEventListener('resize', () => {
     }
 });
 
-/* Phaser 初始化後（canvas 就位後）定位按鈕 */
+/* Phaser 初始化後（canvas 就位後）定位按鈕，並默認開啟世界地圖 */
 (function waitCanvas() {
     if (phaserGame.canvas && phaserGame.canvas.getBoundingClientRect().width > 0) {
         positionMapBtn();
+        toggleMap(); // 默認進入遊戲先顯示世界地圖
     } else {
         setTimeout(waitCanvas, 100);
     }
