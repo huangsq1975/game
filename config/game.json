@@ -1,59 +1,99 @@
 {
   "canvas": {
+    "_": "畫布尺寸（px），對應 Phaser Game width/height",
     "width": 390,
     "height": 780
   },
   "grid": {
+    "_": "六邊形網格幾何參數",
     "cols": 7,
     "rows": 12,
     "hexSize": 28,
+    "_hexSize": "六邊形外接圓半徑（px），決定格子大小",
     "uiHeight": 148,
+    "_uiHeight": "底部 UI 面板高度（px）",
     "gridTop": 36,
-    "gridOffsetX": 69
+    "_gridTop": "網格頂部起始 Y 偏移（px）",
+    "gridOffsetX": 69,
+    "_gridOffsetX": "網格左側起始 X 偏移（px），col=0 的中心 X"
   },
   "economy": {
+    "_": "金幣系統參數",
     "initialGold": 80,
+    "_initialGold": "雙方開局金幣",
     "maxGold": 200,
+    "_maxGold": "金幣上限",
     "regenPerSec": 10,
+    "_regenPerSec": "每秒基礎金幣回收量",
     "fortBonusPerSec": 6,
-    "regenInterval": 1000
+    "_fortBonusPerSec": "每個己方占領要塞每秒額外獲得的金幣",
+    "regenInterval": 1000,
+    "_regenInterval": "金幣回收觸發間隔（ms）"
   },
   "timer": {
+    "_": "倒計時參數",
     "matchDuration": 300,
-    "warnSeconds": 30
+    "_matchDuration": "每局時長（秒），時間到比較要塞數決定勝負",
+    "warnSeconds": 30,
+    "_warnSeconds": "剩餘多少秒時計時器變紅警示"
   },
   "player": {
-    "autoSpawnInterval": 1000
+    "_": "玩家行為參數",
+    "autoSpawnInterval": 1000,
+    "_autoSpawnInterval": "玩家自動出兵間隔（ms），每間隔嘗試部署選中兵種"
   },
   "ai": {
+    "_": "AI 行為參數，陣列索引對應難易度 0=簡單 1=普通 2=困難",
     "laneRotateInterval": 7000,
+    "_laneRotateInterval": "AI 切換進攻路線的間隔（ms）",
     "spawnIntervals": [1600, 1000, 700],
-    "goldMultipliers": [0.6, 1.0, 1.5]
+    "_spawnIntervals": "AI 出兵間隔（ms），值越小出兵越快",
+    "goldMultipliers": [0.6, 1.0, 1.5],
+    "_goldMultipliers": "AI 金幣獲取倍率，影響基礎回收與要塞加成"
   },
   "combat": {
+    "_": "戰鬥數值參數",
     "attackInterval": 1100,
+    "_attackInterval": "每次攻擊的間隔（ms）",
     "beatMultiplier": 1.6,
+    "_beatMultiplier": "克制關係下的傷害倍率（攻擊方克制防禦方）",
     "loseMultiplier": 0.6,
+    "_loseMultiplier": "被克制時的傷害倍率（攻擊方被防禦方克制）",
     "damageVarianceMin": -2,
     "damageVarianceMax": 3,
+    "_damageVariance": "每次攻擊的隨機傷害浮動範圍（整數）",
     "bleedInterval": 1500,
+    "_bleedInterval": "後方要塞流血傷害觸發間隔（ms）",
     "bleedDamagePerFort": 5,
-    "maxDeltaMs": 100
+    "_bleedDamagePerFort": "每個被敵方占領的後方要塞每次流血扣血量",
+    "maxDeltaMs": 100,
+    "_maxDeltaMs": "單幀最大 delta（ms），防止失焦後追幀造成跳躍"
   },
   "render": {
+    "_": "渲染與視覺參數",
     "groupStackMax": 8,
+    "_groupStackMax": "同格同隊同兵種最多幾個單位顯示獨立 HP 條，超過改顯示平均條+數量",
     "unitGroupOffsetFactor": 0.28,
+    "_unitGroupOffsetFactor": "多兵種共格時圓圈偏移半徑係數（相對 hexSize）",
     "unitGroupMaxOffset": 9,
+    "_unitGroupMaxOffset": "多兵種共格偏移半徑上限（px）",
     "unitLerpBase": 0.78,
     "unitLerpFrameMs": 16,
+    "_unitLerp": "單位平滑移動插值：每幀 lerpT = 1 - base^(dt/frameMs)",
     "hpBarHeight": 3,
+    "_hpBarHeight": "HP 條高度（px）",
     "hpBarGap": 1,
+    "_hpBarGap": "多條 HP 條之間的間距（px）",
     "hpBarOffsetY": 5,
+    "_hpBarOffsetY": "HP 條距單位圓圈頂部的偏移（px）",
     "fogInset": 0.5,
+    "_fogInset": "戰爭迷霧多邊形向內縮小量（px），避免格子邊緣露白",
     "hexClickTolerance": 6,
+    "_hexClickTolerance": "點擊判定容差（px），超過 hexSize + tolerance 則忽略",
     "unitBtnWidth": 105,
     "unitBtnHeight": 76,
     "unitBtnOffsetY": 30,
-    "unitBtnGap": 8
+    "unitBtnGap": 8,
+    "_unitBtn": "底部兵種選擇按鈕的尺寸與間距（px）"
   }
 }
