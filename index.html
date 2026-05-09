@@ -1746,7 +1746,7 @@ class WorldMap {
         const ctx = cv.getContext('2d');
 
         /* ── Seeded xorshift32 PRNG ── */
-        let _s = 0x9e3779b9;
+        let _s = GC.worldMap.terrainSeed;
         const rng01 = () => {
             _s ^= _s << 13; _s ^= _s >> 17; _s ^= _s << 5;
             return (_s >>> 0) / 0x100000000;

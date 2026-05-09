@@ -82,7 +82,9 @@
     "texWidth": 2048,
     "_texWidth": "地形貼圖寬度（px），建議為 2 的冪次",
     "texHeight": 1024,
-    "_texHeight": "地形貼圖高度（px）"
+    "_texHeight": "地形貼圖高度（px）",
+    "terrainSeed": 2654435769,
+    "_terrainSeed": "地形噪聲隨機種子（xorshift32 初始值），改變數值可產生不同地形，2654435769 = 0x9e3779b9"
   },
   "render": {
     "_": "渲染與視覺參數",
