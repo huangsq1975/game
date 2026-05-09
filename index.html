@@ -1152,9 +1152,9 @@ const phaserGame = new Phaser.Game({
 /* ─── World Map (raw WebGL, no external lib) ─────────── */
 class WorldMap {
     constructor() {
-        this._raf       = null;
-        this.rot        = { x: 0.3, y: 0 };
-        this.zoom       = 2.6;
+        this._raf  = null;
+        this._q    = [Math.cos(0.15), Math.sin(0.15), 0, 0]; // initial tilt (≈rot.x 0.3)
+        this.zoom  = 2.6;
         this.drag       = { on:false, lx:0, ly:0 };
         this.pinch      = 0;
         this._targetRot = null;   // target cell rotation (smooth snap)
@@ -1194,6 +1194,35 @@ class WorldMap {
     _rotX(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array([1,0,0,0,0,c,s,0,0,-s,c,0,0,0,0,1]);}
     _rotY(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array([c,0,-s,0,0,1,0,0,s,0,c,0,0,0,0,1]);}
     _trans(x,y,z){return new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1]);}
+
+    /* ── Quaternion helpers [w,x,y,z] ── */
+    _qMul(a,b){return[a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3],
+                      a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2],
+                      a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1],
+                      a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]];}
+    _qConj(q){return[q[0],-q[1],-q[2],-q[3]];}
+    _qNorm(q){const l=Math.hypot(...q);return l>0?q.map(v=>v/l):q;}
+    _qAA(x,y,z,a){const s=Math.sin(a/2);return[Math.cos(a/2),x*s,y*s,z*s];}
+    _qRotV(q,v){
+        const[w,qx,qy,qz]=q,[vx,vy,vz]=v;
+        const tx=2*(qy*vz-qz*vy),ty=2*(qz*vx-qx*vz),tz=2*(qx*vy-qy*vx);
+        return[vx+w*tx+qy*tz-qz*ty, vy+w*ty+qz*tx-qx*tz, vz+w*tz+qx*ty-qy*tx];
+    }
+    _qToMat(q){
+        const[w,x,y,z]=q;
+        return new Float32Array([
+            1-2*(y*y+z*z), 2*(x*y+w*z),   2*(x*z-w*y),   0,
+            2*(x*y-w*z),   1-2*(x*x+z*z), 2*(y*z+w*x),   0,
+            2*(x*z+w*y),   2*(y*z-w*x),   1-2*(x*x+y*y), 0,
+            0,0,0,1]);
+    }
+    _qSlerp(a,b,t){
+        let d=a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3], bb=b;
+        if(d<0){bb=b.map(v=>-v);d=-d;}
+        if(d>0.9995)return this._qNorm(a.map((v,i)=>v+t*(bb[i]-v)));
+        const th0=Math.acos(d),th=th0*t,s0=Math.cos(th)-d*Math.sin(th)/Math.sin(th0),s1=Math.sin(th)/Math.sin(th0);
+        return a.map((v,i)=>s0*v+s1*bb[i]);
+    }
 
     /* ═══ GL helpers ════════════════════════════════════════ */
     _mkShader(type,src) {
@@ -1541,17 +1570,12 @@ class WorldMap {
         this._raf=requestAnimationFrame(()=>this._tick());
         const gl=this.gl;
 
-        this.rot.x=Math.max(-1.4,Math.min(1.4,this.rot.x));
-
         // Smooth snap to clicked cell
         if(this._targetRot){
-            const ex=this._targetRot.x-this.rot.x;
-            let ey=this._targetRot.y-this.rot.y;
-            ey=ey-Math.round(ey/(2*Math.PI))*2*Math.PI; // wrap to [-π,π]
-            this.rot.x+=ex*0.1; this.rot.y+=ey*0.1;
-            if(Math.abs(ex)<0.001&&Math.abs(ey)<0.001){
-                this.rot.x=this._targetRot.x; this.rot.y=this._targetRot.y; this._targetRot=null;
-            }
+            this._q=this._qSlerp(this._q,this._targetRot,0.1);
+            const d=Math.abs(this._q[0]*this._targetRot[0]+this._q[1]*this._targetRot[1]+
+                             this._q[2]*this._targetRot[2]+this._q[3]*this._targetRot[3]);
+            if(d>0.9999){this._q=this._targetRot;this._targetRot=null;}
         }
 
         gl.clearColor(0,0,0.03,1);
@@ -1560,7 +1584,7 @@ class WorldMap {
         const {width:w,height:h}=this.cv;
         const P  =this._persp(Math.PI/4,w/h,0.1,2000);
         const V  =this._trans(0,0,-this.zoom);
-        const R  =this._mul(this._rotX(this.rot.x),this._rotY(this.rot.y));
+        const R  =this._qToMat(this._q);
         const PV =this._mul(P,V);
         const PVR=this._mul(PV,R);
 
@@ -1581,9 +1605,10 @@ class WorldMap {
         });
         el.addEventListener('mousemove',e=>{
             if(!this.drag.on)return;
-            this.rot.y+=(e.clientX-this.drag.lx)*0.005;
-            this.rot.x+=(e.clientY-this.drag.ly)*0.005;
+            const dx=(e.clientX-this.drag.lx)*0.005, dy=(e.clientY-this.drag.ly)*0.005;
             this.drag.lx=e.clientX; this.drag.ly=e.clientY;
+            const dq=this._qMul(this._qAA(0,1,0,dx),this._qAA(1,0,0,dy));
+            this._q=this._qNorm(this._qMul(dq,this._q));
         });
         el.addEventListener('mouseup',e=>{
             const cp=this._clickPos;
@@ -1609,9 +1634,10 @@ class WorldMap {
         el.addEventListener('touchmove',e=>{
             e.preventDefault();
             if(e.touches.length===1&&this.drag.on){
-                this.rot.y+=(e.touches[0].clientX-this.drag.lx)*0.005;
-                this.rot.x+=(e.touches[0].clientY-this.drag.ly)*0.005;
+                const dx=(e.touches[0].clientX-this.drag.lx)*0.005, dy=(e.touches[0].clientY-this.drag.ly)*0.005;
                 this.drag.lx=e.touches[0].clientX; this.drag.ly=e.touches[0].clientY;
+                const dq=this._qMul(this._qAA(0,1,0,dx),this._qAA(1,0,0,dy));
+                this._q=this._qNorm(this._qMul(dq,this._q));
             } else if(e.touches.length===2){
                 const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
                 this.zoom=Math.max(1.4,Math.min(8,this.zoom*(this.pinch/d)));
@@ -1643,14 +1669,10 @@ class WorldMap {
         const D=b*b-4*a*(this.zoom*this.zoom-1);
         if(D<0)return; // click outside sphere
         const s=(-b-Math.sqrt(D))/(2*a);
-        // Hit point in eye space, then transform to world space via R^T
-        const hx=s*dx, hy=s*dy_, ez=-s+this.zoom; // ez = hit_z + zoom
-        const R=this._mul(this._rotX(this.rot.x),this._rotY(this.rot.y));
-        // R^T × (hx, hy, ez): (R^T)_row_i = column i of R = R[i*4+0..2]
-        const wx=R[0]*hx+R[1]*hy+R[2]*ez;
-        const wy=R[4]*hx+R[5]*hy+R[6]*ez;
-        const wz=R[8]*hx+R[9]*hy+R[10]*ez;
-        // Find nearest cell centroid (max dot product = min angle)
+        // Hit point in eye space → model space via inverse quaternion
+        const hx=s*dx, hy=s*dy_, ez=-s+this.zoom;
+        const [wx,wy,wz]=this._qRotV(this._qConj(this._q),[hx,hy,ez]);
+        // Find nearest cell centroid
         const cells=this._cellCoords; if(!cells)return;
         let best=-Infinity, bestCen=null;
         for(let i=0;i<cells.length;i++){
@@ -1659,14 +1681,12 @@ class WorldMap {
             if(d>best){best=d;bestCen=c.cen;}
         }
         if(!bestCen)return;
-        // Compute (rot.x, rot.y) that brings bestCen to screen center:
-        // R_Y(ry) × R_X(rx) × c = [0,0,1]  →  ry = atan2(-cx,cz), rx = atan2(cy, rxy)
+        // Quaternion that rotates bestCen → [0,0,1] (face camera)
         const [cx,cy,cz]=bestCen;
-        const rxy=Math.sqrt(cx*cx+cz*cz);
-        this._targetRot={
-            x:Math.max(-1.4,Math.min(1.4,Math.atan2(cy,rxy))),
-            y:Math.atan2(-cx,cz)
-        };
+        const tlen=Math.sqrt((1+cz)*(1+cz)+cy*cy+cx*cx);
+        this._targetRot=tlen>1e-6
+            ?this._qNorm([1+cz,cy,-cx,0])
+            :[0,0,1,0]; // degenerate: point directly behind, flip 180° around Y
     }
 
     /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
