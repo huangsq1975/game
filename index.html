@@ -1157,105 +1157,301 @@ const phaserGame = new Phaser.Game({
     },
 });
 
-/* ─── World Map ──────────────────────────────────────── */
+/* ─── World Map (raw WebGL, no external lib) ─────────── */
 class WorldMap {
     constructor() {
         this._raf  = null;
         this.rot   = { x: 0.3, y: 0 };
         this.zoom  = 2.6;
-        this.drag  = { on: false, lx: 0, ly: 0 };
+        this.drag  = { on:false, lx:0, ly:0 };
         this.pinch = 0;
 
-        /* Renderer */
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
-        this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-        this.renderer.setClearColor(0x000008);
-        document.getElementById('worldmap').appendChild(this.renderer.domElement);
+        const cv = document.createElement('canvas');
+        document.getElementById('worldmap').appendChild(cv);
+        this.cv = cv;
+        this.gl = cv.getContext('webgl', { antialias:true, alpha:false });
 
-        /* Scene & camera */
-        this.scene  = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
-        this.camera.position.z = this.zoom;
-
-        this._buildStars();
-        this._buildGlobe();
-
-        /* Lights */
-        this.scene.add(new THREE.AmbientLight(0x223355, 1.2));
-        const sun = new THREE.DirectionalLight(0xfff5ee, 1.8);
-        sun.position.set(5, 2, 4);
-        this.scene.add(sun);
-
+        this._initGL();
         this._initControls();
         window.addEventListener('resize', () => this._resize());
         this._resize();
     }
 
-    _resize() {
-        const w = innerWidth, h = innerHeight;
-        this.renderer.setSize(w, h);
-        this.camera.aspect = w / h;
-        this.camera.updateProjectionMatrix();
+    /* ═══ Column-major mat4 helpers ════════════════════════ */
+    _mul(a,b) {
+        const r=new Float32Array(16);
+        for(let c=0;c<4;c++) for(let i=0;i<4;i++) for(let k=0;k<4;k++)
+            r[c*4+i]+=a[k*4+i]*b[c*4+k];
+        return r;
+    }
+    _persp(fov,asp,n,f) {
+        const t=1/Math.tan(fov/2),d=n-f;
+        return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/d,-1, 0,0,2*f*n/d,0]);
+    }
+    _rotX(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array([1,0,0,0,0,c,s,0,0,-s,c,0,0,0,0,1]);}
+    _rotY(a){const c=Math.cos(a),s=Math.sin(a);return new Float32Array([c,0,-s,0,0,1,0,0,s,0,c,0,0,0,0,1]);}
+    _trans(x,y,z){return new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1]);}
+
+    /* ═══ GL helpers ════════════════════════════════════════ */
+    _mkShader(type,src) {
+        const gl=this.gl,s=gl.createShader(type);
+        gl.shaderSource(s,src); gl.compileShader(s); return s;
+    }
+    _mkProg(vs,fs) {
+        const gl=this.gl,p=gl.createProgram();
+        gl.attachShader(p,this._mkShader(gl.VERTEX_SHADER,vs));
+        gl.attachShader(p,this._mkShader(gl.FRAGMENT_SHADER,fs));
+        gl.linkProgram(p); return p;
+    }
+    _mkBuf(data,target) {
+        const gl=this.gl,b=gl.createBuffer();
+        target=target||gl.ARRAY_BUFFER;
+        gl.bindBuffer(target,b); gl.bufferData(target,data,gl.STATIC_DRAW); return b;
+    }
+    _attr(prog,name,buf,size) {
+        const gl=this.gl,loc=gl.getAttribLocation(prog,name);
+        if(loc<0)return;
+        gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc,size,gl.FLOAT,false,0,0);
+    }
+    _uni(prog,name){return this.gl.getUniformLocation(prog,name);}
+
+    /* ═══ Sphere geometry ═══════════════════════════════════ */
+    _mkSphere(lat,lon) {
+        const pos=[],norm=[],uv=[],idx=[];
+        for(let i=0;i<=lat;i++){
+            const t=i*Math.PI/lat,st=Math.sin(t),ct=Math.cos(t);
+            for(let j=0;j<=lon;j++){
+                const p=j*2*Math.PI/lon,sp=Math.sin(p),cp=Math.cos(p);
+                const x=cp*st,y=ct,z=sp*st;
+                pos.push(x,y,z); norm.push(x,y,z); uv.push(j/lon,i/lat);
+            }
+        }
+        for(let i=0;i<lat;i++) for(let j=0;j<lon;j++){
+            const a=i*(lon+1)+j,b=a+lon+1;
+            idx.push(a,b,a+1,b,b+1,a+1);
+        }
+        const gl=this.gl;
+        return {
+            pos: this._mkBuf(new Float32Array(pos)),
+            norm:this._mkBuf(new Float32Array(norm)),
+            uv:  this._mkBuf(new Float32Array(uv)),
+            idx: this._mkBuf(new Uint16Array(idx),gl.ELEMENT_ARRAY_BUFFER),
+            count:idx.length
+        };
     }
 
-    /* ── Stars ── */
-    _buildStars() {
-        const n   = 3500;
-        const pos = new Float32Array(n * 3);
-        for (let i = 0; i < n; i++) {
-            const r     = 300 + Math.random() * 400;
-            const theta = Math.random() * Math.PI * 2;
-            const phi   = Math.acos(2 * Math.random() - 1);
-            pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
-            pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
-            pos[i*3+2] = r * Math.cos(phi);
+    /* ═══ Stars ═════════════════════════════════════════════ */
+    _mkStars(n) {
+        const pos=[],sz=[];
+        for(let i=0;i<n;i++){
+            const r=280+Math.random()*220,t=Math.random()*Math.PI*2,p=Math.acos(2*Math.random()-1);
+            pos.push(r*Math.sin(p)*Math.cos(t),r*Math.sin(p)*Math.sin(t),r*Math.cos(p));
+            sz.push(0.6+Math.random()*2.4);
         }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        /* varying brightness: two layers */
-        this.scene.add(new THREE.Points(geo,
-            new THREE.PointsMaterial({ color:0xffffff, size:1.2, sizeAttenuation:false })));
-        const pos2 = new Float32Array(600 * 3);
-        for (let i = 0; i < 600; i++) {
-            const r=260+Math.random()*100, t=Math.random()*Math.PI*2, p=Math.acos(2*Math.random()-1);
-            pos2[i*3]=r*Math.sin(p)*Math.cos(t); pos2[i*3+1]=r*Math.sin(p)*Math.sin(t); pos2[i*3+2]=r*Math.cos(p);
-        }
-        const geo2 = new THREE.BufferGeometry();
-        geo2.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
-        this.scene.add(new THREE.Points(geo2,
-            new THREE.PointsMaterial({ color:0xaaccff, size:2.0, sizeAttenuation:false })));
+        return {pos:this._mkBuf(new Float32Array(pos)),sz:this._mkBuf(new Float32Array(sz)),count:n};
     }
 
-    /* ── Globe ── */
-    _buildGlobe() {
-        const earthTex = new THREE.CanvasTexture(this._drawEarth());
-        const specTex  = new THREE.CanvasTexture(this._drawSpecular());
+    /* ═══ Texture ═══════════════════════════════════════════ */
+    _mkTex(cv) {
+        const gl=this.gl,t=gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D,t);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,cv);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+        return t;
+    }
 
-        this.globe = new THREE.Mesh(
-            new THREE.SphereGeometry(1, 72, 72),
-            new THREE.MeshPhongMaterial({
-                map: earthTex, specularMap: specTex,
-                specular: new THREE.Color(0x224466), shininess: 28,
-            })
+    /* ═══ Init WebGL ════════════════════════════════════════ */
+    _initGL() {
+        const gl=this.gl;
+        gl.enable(gl.DEPTH_TEST);
+        gl.enable(gl.BLEND);
+        gl.enable(gl.CULL_FACE);
+
+        /* Globe program */
+        this._gProg=this._mkProg(
+            `attribute vec3 a_pos;attribute vec2 a_uv;attribute vec3 a_norm;
+             uniform mat4 u_mvp;uniform mat4 u_rot;
+             varying vec2 v_uv;varying vec3 v_norm;
+             void main(){
+                gl_Position=u_mvp*vec4(a_pos,1.0);
+                v_uv=a_uv;
+                v_norm=mat3(u_rot)*a_norm;
+             }`,
+            `precision mediump float;
+             uniform sampler2D u_tex;
+             varying vec2 v_uv;varying vec3 v_norm;
+             void main(){
+                vec3 L=normalize(vec3(3.0,1.5,2.0));
+                float d=max(dot(normalize(v_norm),L),0.0);
+                vec4 c=texture2D(u_tex,v_uv);
+                gl_FragColor=vec4(c.rgb*(0.18+d*0.82),1.0);
+             }`
         );
-        this.scene.add(this.globe);
 
-        /* Atmosphere */
-        this.scene.add(new THREE.Mesh(
-            new THREE.SphereGeometry(1.018, 64, 64),
-            new THREE.MeshPhongMaterial({
-                color:0x3388ff, transparent:true, opacity:0.10, side:THREE.BackSide
-            })
-        ));
-        /* Outer glow */
-        this.scene.add(new THREE.Mesh(
-            new THREE.SphereGeometry(1.06, 32, 32),
-            new THREE.MeshPhongMaterial({
-                color:0x1155aa, transparent:true, opacity:0.04, side:THREE.BackSide
-            })
-        ));
+        /* Star program */
+        this._sProg=this._mkProg(
+            `attribute vec3 a_pos;attribute float a_size;
+             uniform mat4 u_mvp;
+             void main(){gl_Position=u_mvp*vec4(a_pos,1.0);gl_PointSize=a_size;}`,
+            `precision mediump float;
+             void main(){
+                float d=length(gl_PointCoord-0.5)*2.0;
+                if(d>1.0)discard;
+                gl_FragColor=vec4(1.0,1.0,1.0,1.0-smoothstep(0.3,1.0,d));
+             }`
+        );
+
+        /* Atmosphere program — rim glow using unrotated sphere normals */
+        this._aProg=this._mkProg(
+            `attribute vec3 a_pos;attribute vec3 a_norm;
+             uniform mat4 u_mvp;
+             varying float v_rim;
+             void main(){
+                gl_Position=u_mvp*vec4(a_pos*1.055,1.0);
+                v_rim=1.0-abs(a_norm.z);
+             }`,
+            `precision mediump float;
+             varying float v_rim;
+             void main(){
+                float a=pow(v_rim,2.5)*0.75;
+                gl_FragColor=vec4(0.25,0.55,1.0,a);
+             }`
+        );
+
+        this._sphere=this._mkSphere(64,64);
+        this._stars =this._mkStars(4000);
+        this._tex   =this._mkTex(this._drawEarth());
     }
 
+    /* ═══ Draw calls ════════════════════════════════════════ */
+    _drawGlobe(mvp,rot) {
+        const gl=this.gl,p=this._gProg,s=this._sphere;
+        gl.useProgram(p);
+        gl.cullFace(gl.BACK);
+        gl.depthMask(true);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+        this._attr(p,'a_pos', s.pos, 3);
+        this._attr(p,'a_uv',  s.uv,  2);
+        this._attr(p,'a_norm',s.norm,3);
+        gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
+        gl.uniformMatrix4fv(this._uni(p,'u_rot'),false,rot);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D,this._tex);
+        gl.uniform1i(this._uni(p,'u_tex'),0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,s.idx);
+        gl.drawElements(gl.TRIANGLES,s.count,gl.UNSIGNED_SHORT,0);
+    }
+
+    _drawStars(mvp) {
+        const gl=this.gl,p=this._sProg,st=this._stars;
+        gl.useProgram(p);
+        gl.depthMask(false);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        this._attr(p,'a_pos', st.pos,3);
+        this._attr(p,'a_size',st.sz, 1);
+        gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
+        gl.drawArrays(gl.POINTS,0,st.count);
+        gl.depthMask(true);
+    }
+
+    _drawAtm(mvp) {
+        const gl=this.gl,p=this._aProg,s=this._sphere;
+        gl.useProgram(p);
+        gl.cullFace(gl.BACK);
+        gl.depthMask(false);
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        this._attr(p,'a_pos', s.pos, 3);
+        this._attr(p,'a_norm',s.norm,3);
+        gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,s.idx);
+        gl.drawElements(gl.TRIANGLES,s.count,gl.UNSIGNED_SHORT,0);
+        gl.depthMask(true);
+    }
+
+    /* ═══ Render loop ═══════════════════════════════════════ */
+    _tick() {
+        this._raf=requestAnimationFrame(()=>this._tick());
+        const gl=this.gl;
+
+        if(!this.drag.on) this.rot.y+=0.0025;
+        this.rot.x=Math.max(-1.4,Math.min(1.4,this.rot.x));
+
+        gl.clearColor(0,0,0.03,1);
+        gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+        const {width:w,height:h}=this.cv;
+        const P  =this._persp(Math.PI/4,w/h,0.1,2000);
+        const V  =this._trans(0,0,-this.zoom);
+        const R  =this._mul(this._rotX(this.rot.x),this._rotY(this.rot.y));
+        const PV =this._mul(P,V);
+        const PVR=this._mul(PV,R);
+
+        this._drawStars(PV);
+        this._drawGlobe(PVR,R);
+        this._drawAtm(PV);
+    }
+
+    /* ═══ Controls ══════════════════════════════════════════ */
+    _initControls() {
+        const el=this.cv;
+        el.addEventListener('mousedown',e=>{this.drag.on=true;this.drag.lx=e.clientX;this.drag.ly=e.clientY;});
+        el.addEventListener('mousemove',e=>{
+            if(!this.drag.on)return;
+            this.rot.y+=(e.clientX-this.drag.lx)*0.005;
+            this.rot.x+=(e.clientY-this.drag.ly)*0.005;
+            this.drag.lx=e.clientX;this.drag.ly=e.clientY;
+        });
+        el.addEventListener('mouseup',   ()=>{this.drag.on=false;});
+        el.addEventListener('mouseleave',()=>{this.drag.on=false;});
+        el.addEventListener('wheel',e=>{
+            e.preventDefault();
+            this.zoom=Math.max(1.4,Math.min(8,this.zoom+e.deltaY*0.004));
+        },{passive:false});
+        el.addEventListener('touchstart',e=>{
+            if(e.touches.length===1){this.drag.on=true;this.drag.lx=e.touches[0].clientX;this.drag.ly=e.touches[0].clientY;}
+            else if(e.touches.length===2){this.drag.on=false;this.pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}
+        },{passive:true});
+        el.addEventListener('touchmove',e=>{
+            e.preventDefault();
+            if(e.touches.length===1&&this.drag.on){
+                this.rot.y+=(e.touches[0].clientX-this.drag.lx)*0.005;
+                this.rot.x+=(e.touches[0].clientY-this.drag.ly)*0.005;
+                this.drag.lx=e.touches[0].clientX;this.drag.ly=e.touches[0].clientY;
+            } else if(e.touches.length===2){
+                const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+                this.zoom=Math.max(1.4,Math.min(8,this.zoom*(this.pinch/d)));
+                this.pinch=d;
+            }
+        },{passive:false});
+        el.addEventListener('touchend',()=>{this.drag.on=false;});
+    }
+
+    /* ═══ Resize ════════════════════════════════════════════ */
+    _resize() {
+        this.cv.width=innerWidth; this.cv.height=innerHeight;
+        this.gl.viewport(0,0,innerWidth,innerHeight);
+    }
+
+    /* ═══ Show / Hide ═══════════════════════════════════════ */
+    show() {
+        document.getElementById('worldmap').style.display='block';
+        document.getElementById('wm-back').style.display='block';
+        document.getElementById('map-btn').style.display='none';
+        this._resize();
+        if(!this._raf)this._tick();
+    }
+    hide() {
+        cancelAnimationFrame(this._raf);this._raf=null;
+        document.getElementById('worldmap').style.display='none';
+        document.getElementById('wm-back').style.display='none';
+        document.getElementById('map-btn').style.display='block';
+    }
+
+    /* ═══ Earth texture (Canvas 2D) ═════════════════════════ */
     _drawEarth() {
         const W = 2048, H = 1024;
         const cv = document.createElement('canvas');
@@ -1359,119 +1555,20 @@ class WorldMap {
         return cv;
     }
 
-    _drawSpecular() {
-        const W=512, H=256;
-        const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
-        const ctx=cv.getContext('2d');
-        ctx.fillStyle='#dddddd'; ctx.fillRect(0,0,W,H); // ocean = shiny
-        ctx.fillStyle='#222222'; // land = matte
-        ctx.fillRect(W*.10,H*.10,W*.23,H*.45); // Americas
-        ctx.fillRect(W*.42,H*.10,W*.42,H*.70); // Eurasia+Africa
-        ctx.fillRect(W*.73,H*.53,W*.22,H*.26); // Australia
-        return cv;
-    }
-
-    /* ── Controls ── */
-    _initControls() {
-        const el = this.renderer.domElement;
-
-        el.addEventListener('mousedown', e => {
-            this.drag.on=true; this.drag.lx=e.clientX; this.drag.ly=e.clientY;
-        });
-        el.addEventListener('mousemove', e => {
-            if (!this.drag.on) return;
-            this.rot.y += (e.clientX-this.drag.lx)*0.005;
-            this.rot.x += (e.clientY-this.drag.ly)*0.005;
-            this.rot.x = Math.max(-1.4, Math.min(1.4, this.rot.x));
-            this.drag.lx=e.clientX; this.drag.ly=e.clientY;
-        });
-        el.addEventListener('mouseup',    ()=>{ this.drag.on=false; });
-        el.addEventListener('mouseleave', ()=>{ this.drag.on=false; });
-        el.addEventListener('wheel', e => {
-            e.preventDefault();
-            this.zoom = Math.max(1.4, Math.min(8, this.zoom + e.deltaY*0.004));
-        }, { passive:false });
-
-        el.addEventListener('touchstart', e => {
-            if (e.touches.length===1) {
-                this.drag.on=true; this.drag.lx=e.touches[0].clientX; this.drag.ly=e.touches[0].clientY;
-            } else if (e.touches.length===2) {
-                this.drag.on=false;
-                this.pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
-                                      e.touches[0].clientY-e.touches[1].clientY);
-            }
-        }, { passive:true });
-        el.addEventListener('touchmove', e => {
-            e.preventDefault();
-            if (e.touches.length===1 && this.drag.on) {
-                this.rot.y += (e.touches[0].clientX-this.drag.lx)*0.005;
-                this.rot.x += (e.touches[0].clientY-this.drag.ly)*0.005;
-                this.rot.x = Math.max(-1.4, Math.min(1.4, this.rot.x));
-                this.drag.lx=e.touches[0].clientX; this.drag.ly=e.touches[0].clientY;
-            } else if (e.touches.length===2) {
-                const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
-                                   e.touches[0].clientY-e.touches[1].clientY);
-                this.zoom=Math.max(1.4,Math.min(8, this.zoom*(this.pinch/d)));
-                this.pinch=d;
-            }
-        }, { passive:false });
-        el.addEventListener('touchend', ()=>{ this.drag.on=false; });
-    }
-
-    /* ── Loop ── */
-    _tick() {
-        this._raf = requestAnimationFrame(()=>this._tick());
-        if (!this.drag.on) this.rot.y += 0.0025;
-        this.globe.rotation.x = this.rot.x;
-        this.globe.rotation.y = this.rot.y;
-        this.camera.position.z = this.zoom;
-        this.renderer.render(this.scene, this.camera);
-    }
-
-    show() {
-        document.getElementById('worldmap').style.display = 'block';
-        document.getElementById('wm-back').style.display  = 'block';
-        document.getElementById('map-btn').style.display  = 'none';
-        this._resize();
-        if (!this._raf) this._tick();
-    }
-
-    hide() {
-        cancelAnimationFrame(this._raf); this._raf=null;
-        document.getElementById('worldmap').style.display = 'none';
-        document.getElementById('wm-back').style.display  = 'none';
-        document.getElementById('map-btn').style.display  = 'block';
-    }
 }
 
 let _worldMap = null;
-let _threeReady = false;
-
-function _loadThree(cb) {
-    if (_threeReady) { cb(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.min.js';
-    s.onload = () => { _threeReady = true; cb(); };
-    document.head.appendChild(s);
-}
 
 function toggleMap() {
-    /* Pause / resume Phaser scenes */
     const active = phaserGame.scene.getScenes(true);
     const paused = phaserGame.scene.getScenes(false).filter(s => s.scene.isPaused());
-
-    const wm = document.getElementById('worldmap');
-    const showing = wm.style.display === 'block';
+    const showing = document.getElementById('worldmap').style.display === 'block';
 
     if (!showing) {
-        /* → world map */
         active.forEach(s => s.scene.pause());
-        _loadThree(() => {
-            if (!_worldMap) _worldMap = new WorldMap();
-            _worldMap.show();
-        });
+        if (!_worldMap) _worldMap = new WorldMap();
+        _worldMap.show();
     } else {
-        /* → battle */
         _worldMap.hide();
         phaserGame.scene.getScenes(false)
             .filter(s => !paused.includes(s))
