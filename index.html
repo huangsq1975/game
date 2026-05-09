@@ -1871,12 +1871,12 @@ class WorldMap {
                     r=lerp(155,200,t)|0; g=lerp(150,198,t)|0; b=lerp(145,200,t)|0;
                 } else {
                     /* Permanent snow / peak */
-                    r=235; g=245; b=255;
+                    r=195; g=210; b=225;
                 }
 
-                /* Polar ice blend */
-                const ice = clamp((latAbs-0.80)/0.20, 0, 1);
-                r=(lerp(r,228,ice))|0; g=(lerp(g,242,ice))|0; b=(lerp(b,255,ice))|0;
+                /* Polar ice blend — starts near pole, muted blue-grey */
+                const ice = clamp((latAbs-0.90)/0.10, 0, 1) * 0.65;
+                r=(lerp(r,185,ice))|0; g=(lerp(g,205,ice))|0; b=(lerp(b,225,ice))|0;
 
                 const i=(py*W+px)*4;
                 d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255;
