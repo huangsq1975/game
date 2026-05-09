@@ -1351,8 +1351,9 @@ class WorldMap {
              }`
         );
 
-        this._sphere=this._mkSphere(64,64);
-        this._stars =this._mkStars(4000);
+        const wmc=GC.worldMap;
+        this._sphere=this._mkSphere(wmc.sphereLatSegs,wmc.sphereLonSegs);
+        this._stars =this._mkStars(wmc.starCount);
         this._tex   =this._mkTex(this._drawEarth());
 
         /* Truncated icosahedron grid */
@@ -1362,12 +1363,12 @@ class WorldMap {
             `precision mediump float;uniform vec4 u_color;
              void main(){gl_FragColor=u_color;}`
         );
-        this._icoGrid=this._mkTruncIcoGrid();
+        this._icoGrid=this._mkTruncIcoGrid(wmc.icoSubdivisions);
 
     }
 
     /* ═══ Dual grid = hexagons + pentagons (Goldberg polyhedron) ══ */
-    _mkTruncIcoGrid() {
+    _mkTruncIcoGrid(subdivisions) {
         // Top-aligned icosahedron: north pole at y=+1, south pole at y=-1
         const r2=2/Math.sqrt(5), y1=1/Math.sqrt(5);
         let verts=[[0,1,0]];
@@ -1380,8 +1381,7 @@ class WorldMap {
             [6,7,2],[7,8,3],[8,9,4],[9,10,5],[10,6,1],
             [11,7,6],[11,8,7],[11,9,8],[11,10,9],[11,6,10]
         ];
-        // 2 levels of midpoint subdivision → 162 verts, 320 triangular faces
-        for(let s=0;s<2;s++){
+        for(let s=0;s<subdivisions;s++){
             const nf=[],cache={};
             const mid=(i,j)=>{
                 const k=i<j?`${i},${j}`:`${j},${i}`;
@@ -1740,7 +1740,7 @@ class WorldMap {
 
     /* ═══ Earth texture — procedural Perlin noise terrain ═══ */
     _drawEarth() {
-        const W = 2048, H = 1024;
+        const W = GC.worldMap.texWidth, H = GC.worldMap.texHeight;
         const cv = document.createElement('canvas');
         cv.width = W; cv.height = H;
         const ctx = cv.getContext('2d');

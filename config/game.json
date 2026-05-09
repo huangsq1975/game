@@ -69,6 +69,21 @@
     "maxDeltaMs": 100,
     "_maxDeltaMs": "單幀最大 delta（ms），防止失焦後追幀造成跳躍"
   },
+  "worldMap": {
+    "_": "世界地圖球體渲染參數",
+    "sphereLatSegs": 64,
+    "_sphereLatSegs": "球面緯度方向細分段數（越高越圓滑，需為偶數）",
+    "sphereLonSegs": 64,
+    "_sphereLonSegs": "球面經度方向細分段數",
+    "icoSubdivisions": 3,
+    "_icoSubdivisions": "二十面體格子細分層數（2=162頂點/320面，3=642頂點）",
+    "starCount": 4000,
+    "_starCount": "背景星星數量",
+    "texWidth": 2048,
+    "_texWidth": "地形貼圖寬度（px），建議為 2 的冪次",
+    "texHeight": 1024,
+    "_texHeight": "地形貼圖高度（px）"
+  },
   "render": {
     "_": "渲染與視覺參數",
     "groupStackMax": 8,
