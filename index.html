@@ -248,6 +248,7 @@ class GameScene extends Phaser.Scene {
 
         this.visible = new Set();
         this.mapData = md;
+        generateMapTiles(this.mapData);
 
         this.buildHexSprites();
         this.drawGrid();
@@ -1183,6 +1184,120 @@ class StartScene extends Phaser.Scene {
             { fontSize:'10px', color:'#334455' }
         ).setOrigin(0.5, 0.5);
     }
+}
+
+/* ─── Random Map Tile Generator ─────────────────────── */
+function generateMapTiles(md) {
+    const COLS = GC.grid.cols, ROWS = GC.grid.rows;
+
+    /* Seeded xorshift32 PRNG */
+    let _s = ((Date.now() * 0x9e3779b9) ^ (Math.random() * 0x100000000)) >>> 0 || 1;
+    const rng = () => { _s ^= _s<<13; _s ^= _s>>17; _s ^= _s<<5; return (_s>>>0)/0x100000000; };
+
+    /* Perlin 2D permutation table */
+    const perm = new Uint8Array(512);
+    { const p = new Uint8Array(256);
+      for (let i=0;i<256;i++) p[i]=i;
+      for (let i=255;i>0;i--){const j=Math.floor(rng()*(i+1));const t=p[i];p[i]=p[j];p[j]=t;}
+      for (let i=0;i<512;i++) perm[i]=p[i&255]; }
+
+    const fade = t => t*t*t*(t*(t*6-15)+10);
+    const lrp  = (a,b,t) => a+t*(b-a);
+    const G2   = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+    const n2   = (x,y) => {
+        const xi=Math.floor(x)&255, yi=Math.floor(y)&255;
+        const xf=x-Math.floor(x), yf=y-Math.floor(y);
+        const u=fade(xf), v=fade(yf);
+        const A=perm[xi]+yi, B=perm[xi+1]+yi;
+        const dot=(i,dx,dy)=>{const g=G2[perm[i]%8];return g[0]*dx+g[1]*dy;};
+        return lrp(lrp(dot(A,xf,yf),dot(B,xf-1,yf),u),
+                   lrp(dot(A+1,xf,yf-1),dot(B+1,xf-1,yf-1),u),v);
+    };
+    const fbm2 = (x,y,oct) => {
+        let v=0,a=0.5,f=1,mx=0;
+        for(let i=0;i<oct;i++){v+=n2(x*f,y*f)*a;mx+=a;a*=0.5;f*=2;}
+        return v/mx;
+    };
+
+    /* Height map with island gradient + noise */
+    const offX = rng()*80+10, offY = rng()*80+10;
+    const hmap = {};
+    for (let c=0;c<COLS;c++) for (let r=0;r<ROWS;r++) {
+        const nx = c/(COLS-1), ny = r/(ROWS-1);
+        const cx = nx - 0.5;
+        /* Land dominant at upper-center, water tendency at edges/bottom */
+        const islandG = 0.68 - ny*0.42 - Math.abs(cx)*0.30;
+        const noise   = fbm2(nx*3.5+offX, ny*4.5+offY, 6)*0.5+0.5;
+        hmap[`${c},${r}`] = Math.max(0, Math.min(1, islandG*0.55 + noise*0.45));
+    }
+
+    /* Positions that must be passable land */
+    const mustLand = new Set([
+        `${md.enemyBase.c},${md.enemyBase.r}`,
+        `${md.playerBase.c},${md.playerBase.r}`
+    ]);
+    md.forts.forEach(f => mustLand.add(`${f.c},${f.r}`));
+
+    /* Tile palettes */
+    const HR  = 'Tilesets/TileSets/HexaRealm/Tiles/';
+    const BG  = 'Tilesets/TileSets/HexaRealm/Edges/Beach-Grassland/';
+    const pick = arr => arr[Math.floor(rng()*arr.length)];
+    const GRASS  = [HR+'Grassland.png', HR+'Grassland2.png', HR+'Grassland3.png'];
+    const PLAINS = [HR+'Plains.png',    HR+'Plains2.png',    HR+'Plains3.png'];
+    const GHILL  = [HR+'Grassland+Hill.png', HR+'Grassland+Hill2.png'];
+    const PHILL  = [HR+'Plains+Hill.png',    HR+'Plains+Hill2.png'];
+    const FORST  = [HR+'ForestG.png', HR+'ForestGH.png', HR+'ForestP.png', HR+'ForestPH.png'];
+    const TUNDRA = [HR+'Tundra.png',  HR+'Tundra2.png',  HR+'Tundra3.png'];
+    const THILL  = [HR+'Tundra+Hill.png', HR+'Tundra+Hill2.png'];
+    const MTN    = [HR+'Mountain.png', HR+'Mountain2.png'];
+
+    const rMin = md.renderRowMin ?? -1, rMax = md.renderRowMax ?? 15;
+    const cMin = md.renderColMin ?? -1, cMax = md.renderColMax ?? COLS;
+    const tiles = {};
+
+    /* Border edge tiles (outside playable area) */
+    for (let c=cMin; c<=cMax; c++) {
+        const isL=(c===cMin), isR=(c===cMax);
+        tiles[`${c},${rMin}`] = isL ? BG+'Beach-Grassland-Coast-TopLeft.png'
+                                    : isR? BG+'Beach-Grassland-Coast-TopRight.png'
+                                         : BG+'Beach-Grassland-Coast-Top.png';
+        tiles[`${c},${rMax}`] = isL ? BG+'Beach-Grassland-Coast-BottomLeft.png'
+                                    : isR? BG+'Beach-Grassland-Coast-BottomRight.png'
+                                         : BG+'Beach-Grassland-Coast-Bottom.png';
+    }
+    for (let r=rMin+1; r<rMax; r++) {
+        tiles[`${cMin},${r}`] = r%2===0 ? BG+'Beach-Grassland-Coast-TopLeft.png'
+                                         : BG+'Beach-Grassland-Coast-BottomLeft.png';
+        tiles[`${cMax},${r}`] = r%2===0 ? BG+'Beach-Grassland-Coast-TopRight.png'
+                                         : BG+'Beach-Grassland-Coast-BottomRight.png';
+    }
+
+    /* Extra visual rows below game area (ROWS..rMax-1) — ocean */
+    for (let c=0;c<COLS;c++) for (let r=ROWS;r<rMax;r++) tiles[`${c},${r}`] = HR+'Ocean.png';
+
+    /* Inner playable tiles */
+    for (let c=0;c<COLS;c++) for (let r=0;r<ROWS;r++) {
+        const key = `${c},${r}`;
+        let h = hmap[key];
+        if (mustLand.has(key)) h = Math.max(h, 0.54); // ensure land at strategic hexes
+
+        let tile;
+        if      (h < 0.31) tile = HR+'Ocean.png';
+        else if (h < 0.45) tile = HR+'Coast.png';
+        else if (h < 0.62) { const roll=rng(); tile = roll<0.40?pick(GRASS):roll<0.68?pick(PLAINS):pick(FORST); }
+        else if (h < 0.74) { tile = rng()<0.55 ? pick(GHILL) : pick(PHILL); }
+        else if (h < 0.85) { tile = rng()<0.55 ? pick(TUNDRA) : pick(THILL); }
+        else                tile = pick(MTN);
+
+        /* Special base tiles override terrain */
+        if (key===`${md.enemyBase.c},${md.enemyBase.r}`)   tile = HR+'City center.png';
+        if (key===`${md.playerBase.c},${md.playerBase.r}`) tile = HR+'Citadel.png';
+
+        tiles[key] = tile;
+    }
+
+    md.tiles = tiles;
+    md.defaultTile = pick(GRASS);
 }
 
 /* ─── Phaser init ────────────────────────────────────── */
