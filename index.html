@@ -52,7 +52,7 @@ canvas { display:block; touch-action:none; }
 /* ─── Load game config synchronously before Phaser init ─ */
 function _loadSync(url) {
     const xhr = new XMLHttpRequest();
-    xhr.open('GET', url, false);
+    xhr.open('GET', url + '?_=' + Date.now(), false);
     xhr.send(null);
     return JSON.parse(xhr.responseText);
 }
