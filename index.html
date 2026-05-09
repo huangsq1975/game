@@ -13,6 +13,11 @@ canvas { display:block; touch-action:none; }
     overflow:hidden;
 }
 #worldmap canvas { display:block; width:100%; height:100%; touch-action:none; }
+#wm-ui {
+    display:none; position:fixed; z-index:51;
+    background:url('UITexture/UIBack.png') center/cover no-repeat;
+    align-items:center; justify-content:center;
+}
 #map-btn {
     position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
     z-index:60; padding:7px 22px;
@@ -22,12 +27,11 @@ canvas { display:block; touch-action:none; }
     box-shadow:0 0 10px rgba(0,200,80,0.2);
 }
 #wm-back {
-    position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
-    z-index:61; padding:7px 28px;
-    background:#0c1820; border:1px solid #2a4a6a; border-radius:8px;
-    color:#aaddff; font-size:14px; font-family:sans-serif;
-    cursor:pointer; display:none; white-space:nowrap;
-    box-shadow:0 0 12px rgba(0,100,200,0.3);
+    padding:10px 36px;
+    background:rgba(12,24,32,0.85); border:1px solid #2a4a6a; border-radius:10px;
+    color:#aaddff; font-size:15px; font-family:sans-serif;
+    cursor:pointer; white-space:nowrap;
+    box-shadow:0 0 14px rgba(0,100,200,0.4);
 }
 </style>
 </head>
@@ -35,8 +39,10 @@ canvas { display:block; touch-action:none; }
 
 <!-- World Map Overlay -->
 <div id="worldmap"></div>
-<button id="map-btn"  onclick="toggleMap()">🌍 世界地圖</button>
-<button id="wm-back"  onclick="toggleMap()">⚔ 返回戰鬥</button>
+<div id="wm-ui">
+    <button id="wm-back" onclick="toggleMap()">⚔ 返回戰鬥</button>
+</div>
+<button id="map-btn" onclick="toggleMap()">🌍 世界地圖</button>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 <script src="units.js"></script>
@@ -1420,17 +1426,26 @@ class WorldMap {
     /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
     _resize() {
         // 必須用 phaserGame.canvas，避免 querySelector 取到 WorldMap 自身的 canvas
-        const pc  = phaserGame.canvas;
-        const wm  = document.getElementById('worldmap');
+        const pc   = phaserGame.canvas;
+        const wm   = document.getElementById('worldmap');
+        const wmUI = document.getElementById('wm-ui');
         const rect = pc.getBoundingClientRect();
-        // UI 面板高度按比例換算（Phaser 內部 UI_H / H * 渲染高度）
         const uiRatio = GC.grid.uiHeight / GC.canvas.height;
-        const mapH    = Math.round(rect.height * (1 - uiRatio));
+        const uiPx    = Math.round(rect.height * uiRatio);
+        const mapH    = Math.round(rect.height) - uiPx;
         const mapW    = Math.round(rect.width);
-        wm.style.left   = Math.round(rect.left) + 'px';
-        wm.style.top    = Math.round(rect.top)  + 'px';
+        const left    = Math.round(rect.left);
+        const top     = Math.round(rect.top);
+        // 戰鬥地圖區域（WebGL 球體）
+        wm.style.left   = left + 'px';
+        wm.style.top    = top  + 'px';
         wm.style.width  = mapW + 'px';
         wm.style.height = mapH + 'px';
+        // 底部 UI 面板區域（UIBack.png 背景 + 返回按鈕）
+        wmUI.style.left   = left + 'px';
+        wmUI.style.top    = (top + mapH) + 'px';
+        wmUI.style.width  = mapW + 'px';
+        wmUI.style.height = uiPx + 'px';
         // canvas 像素尺寸跟隨容器（CSS 設定 width/height:100% 做顯示縮放）
         this.cv.width  = mapW;
         this.cv.height = mapH;
@@ -1440,7 +1455,7 @@ class WorldMap {
     /* ═══ Show / Hide ═══════════════════════════════════════ */
     show() {
         document.getElementById('worldmap').style.display='block';
-        document.getElementById('wm-back').style.display='block';
+        document.getElementById('wm-ui').style.display='flex';
         document.getElementById('map-btn').style.display='none';
         this._resize();
         if(!this._raf)this._tick();
@@ -1448,7 +1463,7 @@ class WorldMap {
     hide() {
         cancelAnimationFrame(this._raf);this._raf=null;
         document.getElementById('worldmap').style.display='none';
-        document.getElementById('wm-back').style.display='none';
+        document.getElementById('wm-ui').style.display='none';
         document.getElementById('map-btn').style.display='block';
     }
 
