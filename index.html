@@ -1195,6 +1195,8 @@ const phaserGame = new Phaser.Game({
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
     },
+    pixelArt: true,
+    roundPixels: true,
 });
 
 /* ─── World Map (raw WebGL, no external lib) ─────────── */
@@ -1881,6 +1883,11 @@ class WorldMap {
                 const h = clamp(fbm(sx*2.2,sy*2.2,sz*2.2,7)*1.4+0.5,0,1);
                 const m = clamp(fbm(sx*2.2+8.3,sy*2.2+5.1,sz*2.2+3.7,5)*1.2+0.5,0,1);
 
+                /* ── 緯度平滑混合因子（消除水平環狀邊界） ── */
+                const tropBlend  = clamp((0.30-latAbs)/0.10,0,1); // 熱帶：lat<0.20→1, lat>0.30→0
+                const subarcBlend= clamp((latAbs-0.66)/0.10,0,1); // 亞極：lat<0.66→0, lat>0.76→1
+                const arcticBlend= clamp((latAbs-0.56)/0.10,0,1); // 高緯山丘：lat<0.56→0, lat>0.66→1
+
                 let r,g,b;
                 if (h < 0.38) {
                     const t=h/0.38;
@@ -1892,14 +1899,27 @@ class WorldMap {
                     const t=(h-0.46)/0.04;
                     r=lerp(195,205,t)|0; g=lerp(180,170,t)|0; b=lerp(125,105,t)|0;
                 } else if (h < 0.63) {
-                    if (latAbs > 0.72)                   { r=100; g=115; b=90; }
-                    else if (latAbs<0.28 && m<0.42) { const t=(h-0.50)/0.13; r=lerp(210,195,t)|0; g=lerp(175,155,t)|0; b=lerp(95,75,t)|0; }
-                    else if (latAbs<0.28)            { r=30; g=105; b=35; }
-                    else                             { const t=(h-0.50)/0.13; r=lerp(85,100,t)|0; g=lerp(140,155,t)|0; b=lerp(55,62,t)|0; }
+                    const t=(h-0.50)/0.13;
+                    // 溫帶底色
+                    const r0=lerp(85,100,t),g0=lerp(140,155,t),b0=lerp(55,62,t);
+                    // 熱帶色（乾燥/雨林）
+                    const r1=(m<0.42)?lerp(210,195,t):30, g1=(m<0.42)?lerp(175,155,t):105, b1=(m<0.42)?lerp(95,75,t):35;
+                    // 亞寒帶色
+                    const r2=100,g2=115,b2=90;
+                    r=lerp(lerp(r0,r1,tropBlend),r2,subarcBlend)|0;
+                    g=lerp(lerp(g0,g1,tropBlend),g2,subarcBlend)|0;
+                    b=lerp(lerp(b0,b1,tropBlend),b2,subarcBlend)|0;
                 } else if (h < 0.75) {
-                    if (latAbs > 0.60)                   { r=55; g=88; b=60; }
-                    else if (latAbs<0.28 && m<0.40) { r=160; g=135; b=75; }
-                    else                             { const t=(h-0.63)/0.12; r=lerp(40,60,t)|0; g=lerp(100,118,t)|0; b=lerp(35,48,t)|0; }
+                    const t=(h-0.63)/0.12;
+                    // 溫帶丘陵底色
+                    const r0=lerp(40,60,t),g0=lerp(100,118,t),b0=lerp(35,48,t);
+                    // 熱帶（乾燥稀樹草原）
+                    const r1=(m<0.40)?160:r0, g1=(m<0.40)?135:g0, b1=(m<0.40)?75:b0;
+                    // 高緯丘陵色
+                    const r2=55,g2=88,b2=60;
+                    r=lerp(lerp(r0,r1,tropBlend),r2,arcticBlend)|0;
+                    g=lerp(lerp(g0,g1,tropBlend),g2,arcticBlend)|0;
+                    b=lerp(lerp(b0,b1,tropBlend),b2,arcticBlend)|0;
                 } else if (h < 0.86) {
                     const t=(h-0.75)/0.11;
                     r=lerp(110,145,t)|0; g=lerp(95,125,t)|0; b=lerp(75,100,t)|0;
