@@ -1605,7 +1605,7 @@ class WorldMap {
         gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
         this._attr(p,'a_pos',g.pos,3);
         gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
-        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([0.6,0.85,1.0,0.35]));
+        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([0.75,0.92,1.0,0.18]));
         gl.drawArrays(gl.LINES,0,g.count);
         gl.depthMask(true);
     }
