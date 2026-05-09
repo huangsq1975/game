@@ -1414,7 +1414,11 @@ class WorldMap {
              void main(){gl_FragColor=u_color;}`
         );
         this._icoGrid=this._mkTruncIcoGrid(wmc.icoSubdivisions);
-        this._tex   =this._mkTex(this._drawEarth());
+        const earthCv=this._drawEarth();
+        this._texNoGrid=this._mkTex(earthCv);
+        this._bakeGrid(earthCv);
+        this._texGrid=this._mkTex(earthCv);
+        this._tex=this._texGrid;
 
     }
 
@@ -1496,18 +1500,21 @@ class WorldMap {
             return[a[0]*c+nx*s,a[1]*c+ny*s,a[2]*c+nz*s];
         };
         const es=new Set(),SEGS=4,R=1.002,pos=[];
+        const dualEdges=[];
         for(const ring of dualRings){
             for(let i=0;i<ring.length;i++){
                 const ai=ring[i],bi=ring[(i+1)%ring.length];
                 const key=ai<bi?`${ai},${bi}`:`${bi},${ai}`;
                 if(es.has(key))continue; es.add(key);
                 const a=fcens[ai],b=fcens[bi];
+                dualEdges.push([a,b]);
                 for(let k=0;k<SEGS;k++){
                     const p0=slerp(a,b,k/SEGS),p1=slerp(a,b,(k+1)/SEGS);
                     pos.push(p0[0]*R,p0[1]*R,p0[2]*R,p1[0]*R,p1[1]*R,p1[2]*R);
                 }
             }
         }
+        this._dualEdges=dualEdges;
         return{pos:this._mkBuf(new Float32Array(pos)),count:pos.length/3};
     }
 
@@ -1598,16 +1605,7 @@ class WorldMap {
     }
 
     _drawGrid(mvp) {
-        if(!this.showGrid) return;
-        const gl=this.gl,p=this._lProg,g=this._icoGrid;
-        gl.useProgram(p);
-        gl.depthMask(false);
-        gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-        this._attr(p,'a_pos',g.pos,3);
-        gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
-        gl.uniform4fv(this._uni(p,'u_color'),new Float32Array([0.3,0.7,1.0,0.75]));
-        gl.drawArrays(gl.LINES,0,g.count);
-        gl.depthMask(true);
+        // Grid is baked into the Earth texture; switch _tex to show/hide.
     }
 
 
@@ -1816,6 +1814,45 @@ class WorldMap {
         document.getElementById('map-btn').style.display='block';
     }
 
+    /* ═══ Bake hex/pent grid lines into an Earth canvas ════ */
+    _bakeGrid(cv) {
+        const W=cv.width, H=cv.height, ctx=cv.getContext('2d');
+        const slerp=(a,b,t)=>{
+            let dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+            dot=Math.max(-1,Math.min(1,dot));
+            const th=Math.acos(dot); if(th<1e-9)return a;
+            const s=1/Math.sin(th);
+            return[a[0]*Math.sin((1-t)*th)*s+b[0]*Math.sin(t*th)*s,
+                   a[1]*Math.sin((1-t)*th)*s+b[1]*Math.sin(t*th)*s,
+                   a[2]*Math.sin((1-t)*th)*s+b[2]*Math.sin(t*th)*s];
+        };
+        const STEPS=14;
+        ctx.save();
+        ctx.strokeStyle='rgba(20,40,80,0.38)';
+        ctx.lineWidth=1.2;
+        ctx.lineCap='round';
+        for(const [a,b] of this._dualEdges){
+            const lonA=Math.atan2(a[2],a[0]);
+            ctx.beginPath();
+            let first=true, prevLon=lonA;
+            for(let k=0;k<=STEPS;k++){
+                const p=slerp(a,b,k/STEPS);
+                const lon=Math.atan2(p[2],p[0]);
+                const lat=Math.acos(Math.max(-1,Math.min(1,p[1])));
+                const px=((lon+Math.PI)/(2*Math.PI))*W;
+                const py=(lat/Math.PI)*H;
+                if(k>0&&Math.abs(lon-prevLon)>Math.PI){
+                    ctx.stroke(); ctx.beginPath(); first=true;
+                }
+                if(first){ctx.moveTo(px,py);first=false;}
+                else ctx.lineTo(px,py);
+                prevLon=lon;
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
     /* ═══ Earth texture — procedural Perlin noise terrain ═══ */
     _drawEarth() {
         const W = GC.worldMap.texWidth, H = GC.worldMap.texHeight;
@@ -1959,6 +1996,7 @@ function wmToggleSettings(e) {
 function wmToggleGrid() {
     const wm = _worldMap; if(!wm) return;
     wm.showGrid = !wm.showGrid;
+    wm._tex = wm.showGrid ? wm._texGrid : wm._texNoGrid;
     const btn = document.getElementById('wm-tog-grid');
     btn.textContent = wm.showGrid ? '開' : '關';
     btn.className = 'wm-toggle ' + (wm.showGrid ? 'on' : 'off');
