@@ -1152,11 +1152,13 @@ const phaserGame = new Phaser.Game({
 /* ─── World Map (raw WebGL, no external lib) ─────────── */
 class WorldMap {
     constructor() {
-        this._raf  = null;
-        this.rot   = { x: 0.3, y: 0 };
-        this.zoom  = 2.6;
-        this.drag  = { on:false, lx:0, ly:0 };
-        this.pinch = 0;
+        this._raf       = null;
+        this.rot        = { x: 0.3, y: 0 };
+        this.zoom       = 2.6;
+        this.drag       = { on:false, lx:0, ly:0 };
+        this.pinch      = 0;
+        this._targetRot = null;   // target cell rotation (smooth snap)
+        this._clickPos  = null;   // mouse-down position (click vs drag detection)
 
         const cv = document.createElement('canvas');
         document.getElementById('worldmap').appendChild(cv);
@@ -1531,6 +1533,17 @@ class WorldMap {
 
         this.rot.x=Math.max(-1.4,Math.min(1.4,this.rot.x));
 
+        // Smooth snap to clicked cell
+        if(this._targetRot){
+            const ex=this._targetRot.x-this.rot.x;
+            let ey=this._targetRot.y-this.rot.y;
+            ey=ey-Math.round(ey/(2*Math.PI))*2*Math.PI; // wrap to [-π,π]
+            this.rot.x+=ex*0.1; this.rot.y+=ey*0.1;
+            if(Math.abs(ex)<0.001&&Math.abs(ey)<0.001){
+                this.rot.x=this._targetRot.x; this.rot.y=this._targetRot.y; this._targetRot=null;
+            }
+        }
+
         gl.clearColor(0,0,0.03,1);
         gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
 
@@ -1551,36 +1564,99 @@ class WorldMap {
     /* ═══ Controls ══════════════════════════════════════════ */
     _initControls() {
         const el=this.cv;
-        el.addEventListener('mousedown',e=>{this.drag.on=true;this.drag.lx=e.clientX;this.drag.ly=e.clientY;});
+        el.addEventListener('mousedown',e=>{
+            this._targetRot=null; // cancel any ongoing snap
+            this.drag.on=true; this.drag.lx=e.clientX; this.drag.ly=e.clientY;
+            this._clickPos={x:e.clientX,y:e.clientY};
+        });
         el.addEventListener('mousemove',e=>{
             if(!this.drag.on)return;
             this.rot.y+=(e.clientX-this.drag.lx)*0.005;
             this.rot.x+=(e.clientY-this.drag.ly)*0.005;
-            this.drag.lx=e.clientX;this.drag.ly=e.clientY;
+            this.drag.lx=e.clientX; this.drag.ly=e.clientY;
         });
-        el.addEventListener('mouseup',   ()=>{this.drag.on=false;});
-        el.addEventListener('mouseleave',()=>{this.drag.on=false;});
+        el.addEventListener('mouseup',e=>{
+            const cp=this._clickPos;
+            this.drag.on=false; this._clickPos=null;
+            if(cp&&Math.abs(e.clientX-cp.x)+Math.abs(e.clientY-cp.y)<6)
+                this._handleClick(e.clientX,e.clientY);
+        });
+        el.addEventListener('mouseleave',()=>{this.drag.on=false; this._clickPos=null;});
         el.addEventListener('wheel',e=>{
             e.preventDefault();
             this.zoom=Math.max(1.4,Math.min(8,this.zoom+e.deltaY*0.004));
         },{passive:false});
         el.addEventListener('touchstart',e=>{
-            if(e.touches.length===1){this.drag.on=true;this.drag.lx=e.touches[0].clientX;this.drag.ly=e.touches[0].clientY;}
-            else if(e.touches.length===2){this.drag.on=false;this.pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}
+            this._targetRot=null;
+            if(e.touches.length===1){
+                this.drag.on=true; this.drag.lx=e.touches[0].clientX; this.drag.ly=e.touches[0].clientY;
+                this._clickPos={x:e.touches[0].clientX,y:e.touches[0].clientY};
+            } else if(e.touches.length===2){
+                this.drag.on=false; this._clickPos=null;
+                this.pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+            }
         },{passive:true});
         el.addEventListener('touchmove',e=>{
             e.preventDefault();
             if(e.touches.length===1&&this.drag.on){
                 this.rot.y+=(e.touches[0].clientX-this.drag.lx)*0.005;
                 this.rot.x+=(e.touches[0].clientY-this.drag.ly)*0.005;
-                this.drag.lx=e.touches[0].clientX;this.drag.ly=e.touches[0].clientY;
+                this.drag.lx=e.touches[0].clientX; this.drag.ly=e.touches[0].clientY;
             } else if(e.touches.length===2){
                 const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
                 this.zoom=Math.max(1.4,Math.min(8,this.zoom*(this.pinch/d)));
                 this.pinch=d;
             }
         },{passive:false});
-        el.addEventListener('touchend',()=>{this.drag.on=false;});
+        el.addEventListener('touchend',e=>{
+            const cp=this._clickPos, t=e.changedTouches[0];
+            this.drag.on=false; this._clickPos=null;
+            if(cp&&Math.abs(t.clientX-cp.x)+Math.abs(t.clientY-cp.y)<10)
+                this._handleClick(t.clientX,t.clientY);
+        });
+    }
+
+    /* ═══ Click → snap cell to screen center ════════════════ */
+    _handleClick(mx,my){
+        const rect=this.cv.getBoundingClientRect();
+        const W=this.cv.width, H=this.cv.height;
+        // CSS-pixel → canvas-pixel
+        const px=(mx-rect.left)*(W/rect.width);
+        const py=(my-rect.top)*(H/rect.height);
+        const ndcX=(px/W)*2-1, ndcY=1-(py/H)*2;
+        // Eye-space ray direction (fov = π/4, half-fov = π/8)
+        const asp=W/H, t=1/Math.tan(Math.PI/8);
+        const dx=ndcX*asp/t, dy_=ndcY/t;
+        // Ray-sphere intersection: sphere at (0,0,-zoom) radius 1
+        const a=dx*dx+dy_*dy_+1;
+        const b=-2*this.zoom;
+        const D=b*b-4*a*(this.zoom*this.zoom-1);
+        if(D<0)return; // click outside sphere
+        const s=(-b-Math.sqrt(D))/(2*a);
+        // Hit point in eye space, then transform to world space via R^T
+        const hx=s*dx, hy=s*dy_, ez=-s+this.zoom; // ez = hit_z + zoom
+        const R=this._mul(this._rotX(this.rot.x),this._rotY(this.rot.y));
+        // R^T × (hx, hy, ez): (R^T)_row_i = column i of R = R[i*4+0..2]
+        const wx=R[0]*hx+R[1]*hy+R[2]*ez;
+        const wy=R[4]*hx+R[5]*hy+R[6]*ez;
+        const wz=R[8]*hx+R[9]*hy+R[10]*ez;
+        // Find nearest cell centroid (max dot product = min angle)
+        const cells=this._cellCoords; if(!cells)return;
+        let best=-Infinity, bestCen=null;
+        for(let i=0;i<cells.length;i++){
+            const c=cells[i]; if(!c)continue;
+            const d=c.cen[0]*wx+c.cen[1]*wy+c.cen[2]*wz;
+            if(d>best){best=d;bestCen=c.cen;}
+        }
+        if(!bestCen)return;
+        // Compute (rot.x, rot.y) that brings bestCen to screen center:
+        // R_Y(ry) × R_X(rx) × c = [0,0,1]  →  ry = atan2(-cx,cz), rx = atan2(cy, rxy)
+        const [cx,cy,cz]=bestCen;
+        const rxy=Math.sqrt(cx*cx+cz*cz);
+        this._targetRot={
+            x:Math.max(-1.4,Math.min(1.4,Math.atan2(cy,rxy))),
+            y:Math.atan2(-cx,cz)
+        };
     }
 
     /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
