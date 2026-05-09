@@ -1341,7 +1341,7 @@ class WorldMap {
              varying float v_rim;
              void main(){
                 gl_Position=u_mvp*vec4(a_pos*1.055,1.0);
-                v_rim=1.0-abs(a_norm.z);
+                v_rim=(1.0-abs(a_norm.z))*(1.0-a_norm.y*a_norm.y);
              }`,
             `precision mediump float;
              varying float v_rim;
