@@ -1846,15 +1846,6 @@ class WorldMap {
         }
         ctx.putImageData(img,0,0);
 
-        /* Clouds overlay */
-        ctx.globalAlpha=0.22; ctx.fillStyle='#fff';
-        const rr=(a,b)=>a+Math.random()*(b-a);
-        for(let i=0;i<90;i++){
-            ctx.beginPath();
-            ctx.ellipse(rr(0,W),rr(H*0.08,H*0.92),rr(30,150),rr(12,45),rr(0,Math.PI),0,Math.PI*2);
-            ctx.fill();
-        }
-        ctx.globalAlpha=1;
         return cv;
     }
 
