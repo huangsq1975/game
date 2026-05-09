@@ -1396,8 +1396,8 @@ class WorldMap {
                 return{fi,ang:Math.atan2(px*t2[0]+py*t2[1]+pz*t2[2],px*t1[0]+py*t1[1]+pz*t1[2])};
             }).sort((a,b)=>a.ang-b.ang).map(x=>x.fi);
         });
-        // (x,y) coords: sort vertices north→south (rows), west→east (cols)
-        this._cellCoords=this._assignCellCoords(verts);
+        // (x,y) coords: BFS-ring from north pole using actual adjacency
+        this._cellCoords=this._assignCellCoords(verts,faces);
         // Build dual edge line buffer (blue cell boundaries)
         const slerp=(a,b,t)=>{
             let dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -1427,20 +1427,35 @@ class WorldMap {
     }
 
     /* ═══ Row/column (x,y) for each hex/pent cell (vertex) ════ */
-    _assignCellCoords(verts){
-        // Sort vertices north→south, group same latitude → rows, sort by longitude
-        const items=verts.map((v,i)=>({i,lat:v[1],lon:Math.atan2(v[0],v[2])}))
-                         .sort((a,b)=>b.lat-a.lat);
-        const TOL=0.06, rows=[];
-        let row=[items[0]], ref=items[0].lat;
-        for(let k=1;k<items.length;k++){
-            if(Math.abs(items[k].lat-ref)>TOL){ rows.push(row.sort((a,b)=>a.lon-b.lon)); row=[]; ref=items[k].lat; }
-            row.push(items[k]);
+    _assignCellCoords(verts,faces){
+        // Build vertex adjacency from triangulation edges
+        const adj=verts.map(()=>[]);
+        for(const[a,b,c]of faces){
+            adj[a].push(b,c); adj[b].push(a,c); adj[c].push(a,b);
         }
-        if(row.length) rows.push(row.sort((a,b)=>a.lon-b.lon));
-        // x = column (west→east), y = row (north→south)
+        for(let i=0;i<adj.length;i++) adj[i]=[...new Set(adj[i])];
+        // BFS from vertex 0 (north pole [0,1,0]) → y = graph distance from pole
+        const dist=new Array(verts.length).fill(-1);
+        dist[0]=0;
+        const queue=[0], rings=[[0]];
+        let head=0;
+        while(head<queue.length){
+            const v=queue[head++], d=dist[v];
+            for(const u of adj[v]){
+                if(dist[u]<0){
+                    dist[u]=d+1;
+                    while(rings.length<=d+1) rings.push([]);
+                    rings[d+1].push(u);
+                    queue.push(u);
+                }
+            }
+        }
+        // Within each ring sort west→east by longitude → x = position in ring
         const coords=new Array(verts.length);
-        rows.forEach((r,y)=>r.forEach((item,x)=>{coords[item.i]={cen:verts[item.i],x,y};}));
+        rings.forEach((ring,y)=>{
+            ring.sort((a,b)=>Math.atan2(verts[a][0],verts[a][2])-Math.atan2(verts[b][0],verts[b][2]));
+            ring.forEach((vi,x)=>{ coords[vi]={cen:verts[vi],x,y}; });
+        });
         return coords;
     }
 
