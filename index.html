@@ -1276,22 +1276,19 @@ class WorldMap {
 
         /* Globe program */
         this._gProg=this._mkProg(
-            `attribute vec3 a_pos;attribute vec2 a_uv;attribute vec3 a_norm;
-             uniform mat4 u_mvp;uniform mat4 u_rot;
-             varying vec2 v_uv;varying vec3 v_norm;
+            `attribute vec3 a_pos;attribute vec2 a_uv;
+             uniform mat4 u_mvp;
+             varying vec2 v_uv;
              void main(){
                 gl_Position=u_mvp*vec4(a_pos,1.0);
                 v_uv=a_uv;
-                v_norm=mat3(u_rot)*a_norm;
              }`,
             `precision mediump float;
              uniform sampler2D u_tex;
-             varying vec2 v_uv;varying vec3 v_norm;
+             varying vec2 v_uv;
              void main(){
-                vec3 L=normalize(vec3(3.0,1.5,2.0));
-                float d=max(dot(normalize(v_norm),L),0.0);
                 vec4 c=texture2D(u_tex,v_uv);
-                gl_FragColor=vec4(c.rgb*(0.18+d*0.82),1.0);
+                gl_FragColor=vec4(c.rgb,1.0);
              }`
         );
 
@@ -1505,9 +1502,7 @@ class WorldMap {
         gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
         this._attr(p,'a_pos', s.pos, 3);
         this._attr(p,'a_uv',  s.uv,  2);
-        this._attr(p,'a_norm',s.norm,3);
         gl.uniformMatrix4fv(this._uni(p,'u_mvp'),false,mvp);
-        gl.uniformMatrix4fv(this._uni(p,'u_rot'),false,rot);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D,this._tex);
         gl.uniform1i(this._uni(p,'u_tex'),0);
