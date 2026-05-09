@@ -19,12 +19,12 @@ canvas { display:block; touch-action:none; }
     align-items:center; justify-content:center;
 }
 #map-btn {
-    position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
-    z-index:60; padding:7px 22px;
-    background:#0c1820; border:1px solid #2a5a3a; border-radius:8px;
-    color:#88ffaa; font-size:13px; font-family:sans-serif;
+    position:fixed; z-index:60; padding:5px 18px;
+    transform:translate(-50%,-50%);
+    background:rgba(8,18,28,0.7); border:1px solid #2a5a3a; border-radius:8px;
+    color:#88ffaa; font-size:12px; font-family:sans-serif;
     cursor:pointer; letter-spacing:1px; white-space:nowrap;
-    box-shadow:0 0 10px rgba(0,200,80,0.2);
+    box-shadow:0 0 8px rgba(0,200,80,0.2);
 }
 #wm-back {
     padding:10px 36px;
@@ -1575,6 +1575,21 @@ class WorldMap {
 
 let _worldMap = null;
 
+/* 將「世界地圖」按鈕定位在 Phaser UI 面板的底部條（兵種按鈕之下） */
+function positionMapBtn() {
+    if (!phaserGame.canvas) return;
+    const rect  = phaserGame.canvas.getBoundingClientRect();
+    const scale = rect.height / GC.canvas.height;
+    const uiPx  = rect.height * GC.grid.uiHeight / GC.canvas.height;
+    const panelTop = rect.top + rect.height - uiPx;
+    // 兵種按鈕底部 → 面板底部 之間的中心 Y
+    const btnAreaTop = panelTop + (GC.render.unitBtnOffsetY + GC.render.unitBtnHeight) * scale;
+    const btnAreaBot = rect.top + rect.height;
+    const btn = document.getElementById('map-btn');
+    btn.style.left = (rect.left + rect.width / 2) + 'px';
+    btn.style.top  = ((btnAreaTop + btnAreaBot) / 2) + 'px';
+}
+
 function toggleMap() {
     const active = phaserGame.scene.getScenes(true);
     const paused = phaserGame.scene.getScenes(false).filter(s => s.scene.isPaused());
@@ -1591,6 +1606,23 @@ function toggleMap() {
             .forEach(s => { try { s.scene.resume(); } catch(_){} });
     }
 }
+
+/* 窗口縮放時同步重定位所有覆蓋層 */
+window.addEventListener('resize', () => {
+    positionMapBtn();
+    if (_worldMap && document.getElementById('worldmap').style.display === 'block') {
+        _worldMap._resize();
+    }
+});
+
+/* Phaser 初始化後（canvas 就位後）定位按鈕 */
+(function waitCanvas() {
+    if (phaserGame.canvas && phaserGame.canvas.getBoundingClientRect().width > 0) {
+        positionMapBtn();
+    } else {
+        setTimeout(waitCanvas, 100);
+    }
+})();
 </script>
 </body>
 </html>
