@@ -1788,84 +1788,55 @@ class WorldMap {
             return v/mx; // [-~0.5, ~0.5]
         };
 
-        const clamp = (v,lo,hi) => v<lo?lo:v>hi?hi:v;
-        const SC = 2.2;
-
-        /* ── Biome colour from noise values ── */
-        const biomeRGB = (h,m,latAbs) => {
-            let r,g,b;
-            if (h < 0.38) {
-                const t=h/0.38;
-                r=lerp(3,15,t)|0; g=lerp(15,55,t)|0; b=lerp(55,130,t)|0;
-            } else if (h < 0.46) {
-                const t=(h-0.38)/0.08;
-                r=lerp(15,25,t)|0; g=lerp(55,90,t)|0; b=lerp(130,165,t)|0;
-            } else if (h < 0.50) {
-                const t=(h-0.46)/0.04;
-                r=lerp(195,205,t)|0; g=lerp(180,170,t)|0; b=lerp(125,105,t)|0;
-            } else if (h < 0.63) {
-                if (latAbs > 0.72)                        { r=100; g=115; b=90; }
-                else if (latAbs < 0.28 && m < 0.42) { const t=(h-0.50)/0.13; r=lerp(210,195,t)|0; g=lerp(175,155,t)|0; b=lerp(95,75,t)|0; }
-                else if (latAbs < 0.28)              { r=30;  g=105; b=35; }
-                else                                 { const t=(h-0.50)/0.13; r=lerp(85,100,t)|0; g=lerp(140,155,t)|0; b=lerp(55,62,t)|0; }
-            } else if (h < 0.75) {
-                if (latAbs > 0.60)                        { r=55;  g=88;  b=60; }
-                else if (latAbs < 0.28 && m < 0.40) { r=160; g=135; b=75; }
-                else                                 { const t=(h-0.63)/0.12; r=lerp(40,60,t)|0; g=lerp(100,118,t)|0; b=lerp(35,48,t)|0; }
-            } else if (h < 0.86) {
-                const t=(h-0.75)/0.11;
-                r=lerp(110,145,t)|0; g=lerp(95,125,t)|0; b=lerp(75,100,t)|0;
-            } else if (h < 0.94) {
-                const t=(h-0.86)/0.08;
-                r=lerp(155,200,t)|0; g=lerp(150,198,t)|0; b=lerp(145,200,t)|0;
-            } else {
-                r=195; g=210; b=225;
-            }
-            const ice = clamp((latAbs-0.90)/0.10,0,1)*0.65;
-            return [lerp(r,185,ice)|0, lerp(g,205,ice)|0, lerp(b,225,ice)|0];
-        };
-
-        /* ── Per-cell terrain: sample noise at each centroid ── */
-        const centroids = this._cellCentroids;
-        const cellRGB = centroids.map(([cx,cy,cz]) => {
-            const h = clamp(fbm(cx*SC,cy*SC,cz*SC,7)*1.4+0.5,0,1);
-            const m = clamp(fbm(cx*SC+8.3,cy*SC+5.1,cz*SC+3.7,5)*1.2+0.5,0,1);
-            const latAbs = Math.abs(Math.asin(clamp(cy,-1,1))) / (Math.PI/2);
-            return biomeRGB(h,m,latAbs);
-        });
-
-        /* ── Latitude buckets for fast nearest-centroid lookup ── */
-        const NB = 32;
-        const buckets = Array.from({length:NB},()=>[]);
-        centroids.forEach(([,cy],i)=>{
-            const lat = Math.asin(clamp(cy,-1,1));
-            const bi  = clamp(Math.floor((lat/Math.PI+0.5)*NB),0,NB-1);
-            buckets[bi].push(i);
-        });
-
-        /* ── Paint each pixel with its nearest cell's colour (Voronoi) ── */
+        /* ── Pixel-level terrain generation ── */
         const img = ctx.createImageData(W,H);
         const d   = img.data;
+        const clamp = (v,lo,hi) => v<lo?lo:v>hi?hi:v;
 
         for (let py=0;py<H;py++) {
-            const lat    = (py/H-0.5)*Math.PI;
+            const lat    = (py/H - 0.5) * Math.PI;
+            const latAbs = Math.abs(lat) / (Math.PI/2);
             const cosLat = Math.cos(lat), sinLat = Math.sin(lat);
-            const bi     = clamp(Math.floor((lat/Math.PI+0.5)*NB),0,NB-1);
-            // collect candidates from ±1 latitude band (covers any cell angular radius)
-            const cands = [];
-            for (let b=Math.max(0,bi-1);b<=Math.min(NB-1,bi+1);b++)
-                for (const idx of buckets[b]) cands.push(idx);
 
             for (let px=0;px<W;px++) {
-                const lon = (px/W)*2*Math.PI;
-                const sx  = cosLat*Math.cos(lon), sy=sinLat, sz=cosLat*Math.sin(lon);
-                let best=-2, bestIdx=0;
-                for (const ci of cands) {
-                    const [cx,cy,cz]=centroids[ci];
-                    const dot=cx*sx+cy*sy+cz*sz;
-                    if (dot>best){best=dot;bestIdx=ci;}
+                const lon = (px/W) * 2 * Math.PI;
+                const sx = cosLat*Math.cos(lon), sy=sinLat, sz=cosLat*Math.sin(lon);
+
+                const h = clamp(fbm(sx*2.2,sy*2.2,sz*2.2,7)*1.4+0.5,0,1);
+                const m = clamp(fbm(sx*2.2+8.3,sy*2.2+5.1,sz*2.2+3.7,5)*1.2+0.5,0,1);
+
+                let r,g,b;
+                if (h < 0.38) {
+                    const t=h/0.38;
+                    r=lerp(3,15,t)|0; g=lerp(15,55,t)|0; b=lerp(55,130,t)|0;
+                } else if (h < 0.46) {
+                    const t=(h-0.38)/0.08;
+                    r=lerp(15,25,t)|0; g=lerp(55,90,t)|0; b=lerp(130,165,t)|0;
+                } else if (h < 0.50) {
+                    const t=(h-0.46)/0.04;
+                    r=lerp(195,205,t)|0; g=lerp(180,170,t)|0; b=lerp(125,105,t)|0;
+                } else if (h < 0.63) {
+                    if (latAbs > 0.72)                   { r=100; g=115; b=90; }
+                    else if (latAbs<0.28 && m<0.42) { const t=(h-0.50)/0.13; r=lerp(210,195,t)|0; g=lerp(175,155,t)|0; b=lerp(95,75,t)|0; }
+                    else if (latAbs<0.28)            { r=30; g=105; b=35; }
+                    else                             { const t=(h-0.50)/0.13; r=lerp(85,100,t)|0; g=lerp(140,155,t)|0; b=lerp(55,62,t)|0; }
+                } else if (h < 0.75) {
+                    if (latAbs > 0.60)                   { r=55; g=88; b=60; }
+                    else if (latAbs<0.28 && m<0.40) { r=160; g=135; b=75; }
+                    else                             { const t=(h-0.63)/0.12; r=lerp(40,60,t)|0; g=lerp(100,118,t)|0; b=lerp(35,48,t)|0; }
+                } else if (h < 0.86) {
+                    const t=(h-0.75)/0.11;
+                    r=lerp(110,145,t)|0; g=lerp(95,125,t)|0; b=lerp(75,100,t)|0;
+                } else if (h < 0.94) {
+                    const t=(h-0.86)/0.08;
+                    r=lerp(155,200,t)|0; g=lerp(150,198,t)|0; b=lerp(145,200,t)|0;
+                } else {
+                    r=195; g=210; b=225;
                 }
-                const [r,g,b]=cellRGB[bestIdx];
+
+                const ice = clamp((latAbs-0.90)/0.10,0,1)*0.65;
+                r=lerp(r,185,ice)|0; g=lerp(g,205,ice)|0; b=lerp(b,225,ice)|0;
+
                 const i=(py*W+px)*4;
                 d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255;
             }
