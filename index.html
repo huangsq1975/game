@@ -1435,6 +1435,11 @@ class WorldMap {
         this._cellCentroids=verts.map(v=>[v[0],v[1],v[2]]);
         // (x,y) coords: BFS-ring from north pole using actual adjacency
         this._cellCoords=this._assignCellCoords(verts,faces);
+        // Attach ordered polygon vertices (from dual ring) to each cell
+        for(let vi=0;vi<verts.length;vi++){
+            const cell=this._cellCoords[vi]; if(!cell)continue;
+            cell.poly=dualRings[vi].map(fi=>fcens[fi]);
+        }
         // Build dual edge line buffer (blue cell boundaries)
         const slerp=(a,b,t)=>{
             let dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -1516,15 +1521,26 @@ class WorldMap {
             if(vw<=0) continue;
             const sx=(vx/vw*0.5+0.5)*W, sy=(-vy/vw*0.5+0.5)*H;
             const isSel=sel&&sel.x===cell.x&&sel.y===cell.y;
-            if(isSel){
-                // Highlight ring
-                ctx.beginPath();
-                ctx.arc(sx,sy,14,0,Math.PI*2);
-                ctx.strokeStyle='rgba(255,220,50,0.9)';
-                ctx.lineWidth=2;
-                ctx.stroke();
-                ctx.fillStyle='rgba(255,220,50,0.18)';
-                ctx.fill();
+            if(isSel&&cell.poly){
+                // Project polygon vertices to screen and draw cell outline
+                const pts=cell.poly.map(([pcx,pcy,pcz])=>{
+                    const pvx=mvp[0]*pcx+mvp[4]*pcy+mvp[8]*pcz+mvp[12];
+                    const pvy=mvp[1]*pcx+mvp[5]*pcy+mvp[9]*pcz+mvp[13];
+                    const pvw=mvp[3]*pcx+mvp[7]*pcy+mvp[11]*pcz+mvp[15];
+                    if(pvw<=0)return null;
+                    return[(pvx/pvw*0.5+0.5)*W, (-pvy/pvw*0.5+0.5)*H];
+                });
+                if(pts.every(p=>p!==null)){
+                    ctx.beginPath();
+                    ctx.moveTo(pts[0][0],pts[0][1]);
+                    for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k][0],pts[k][1]);
+                    ctx.closePath();
+                    ctx.strokeStyle='rgba(255,220,50,0.95)';
+                    ctx.lineWidth=2.5;
+                    ctx.stroke();
+                    ctx.fillStyle='rgba(255,220,50,0.15)';
+                    ctx.fill();
+                }
                 ctx.font='bold 9px monospace';
                 ctx.fillStyle='#ffe066';
             } else {
