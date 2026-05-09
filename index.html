@@ -16,17 +16,28 @@ canvas { display:block; touch-action:none; }
 <script>
 'use strict';
 
-/* ─── Config ─────────────────────────────────────────── */
-const W = 390, H = 780;
-const COLS = 7, ROWS = 12;
-const SZ   = 28;          // hex circumradius
-const UI_H = 148;
-const TOP  = 36;          // grid top offset
+/* ─── Load game config synchronously before Phaser init ─ */
+function _loadSync(url) {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, false);
+    xhr.send(null);
+    return JSON.parse(xhr.responseText);
+}
+const GC = _loadSync('config/game.json');
+
+let W    = GC.canvas.width;
+let H    = GC.canvas.height;
+let COLS = GC.grid.cols;
+let ROWS = GC.grid.rows;
+let SZ   = GC.grid.hexSize;
+let UI_H = GC.grid.uiHeight;
+let TOP  = GC.grid.gridTop;
+let GRID_OFFSET_X = GC.grid.gridOffsetX;
 
 /* ─── Flat-top hex geometry (odd-q: odd cols shift DOWN) */
 function h2p(c, r) {
     return {
-        x: 69 + SZ * 1.5 * c,
+        x: GRID_OFFSET_X + SZ * 1.5 * c,
         y: TOP + SZ * Math.sqrt(3) * (r + (c & 1) * 0.5)
     };
 }
@@ -99,74 +110,41 @@ class GameScene extends Phaser.Scene {
         });
 
         this.units    = [];
-        this.hexOwner = {};          // "c,r" -> 'player'|'enemy'
-        this.gold     = 80;
-        this.aiGold   = 80;
+        this.hexOwner = {};
+        this.gold     = GC.economy.initialGold;
+        this.aiGold   = GC.economy.initialGold;
         this.goldT    = 0;
         this.aiT      = 0;
         this.over     = false;
         this.paused   = false;
         this.sel      = 'infantry';
-        this.dirty    = true;        // redraw hex layer flag
-        this.timeLeft = 300;         // 5分鐘倒計時（秒）
+        this.dirty    = true;
+        this.timeLeft = GC.timer.matchDuration;
 
         /* ── Settings ── */
         this.settings = { fogEnabled: true, aiDiff: 1, showCoords: true };
         this.settingsOpen = false;
         this.pausedBeforeSettings = false;
 
-        this.EB = { c:0,      r:0      };   // enemy base  top-left
-        this.PB = { c:COLS-1, r:ROWS-1 };   // player base bottom-right
-        this.forts = [
-            {c:3,r:9},{c:3,r:5},{c:3,r:1},
-            {c:1,r:8},{c:1,r:6},{c:1,r:4},{c:1,r:2},
-            {c:5,r:8},{c:5,r:6},{c:5,r:4},{c:5,r:2}
-        ];
+        const md = this.cache.json.get('mapdata');
+        this.EB    = md.enemyBase;
+        this.PB    = md.playerBase;
+        this.forts = md.forts;
+        this.fixedForts = md.fixedForts;
 
-        this.dE = bfs(this.EB.c, this.EB.r);   // dist to enemy base
-        this.dP = bfs(this.PB.c, this.PB.r);   // dist to player base
+        this.dE = bfs(this.EB.c, this.EB.r);
+        this.dP = bfs(this.PB.c, this.PB.r);
 
-        /* ── Player arrow map (arrowP) ── */
+        /* ── Player arrow map: fort → one row up, then apply overrides ── */
         this.arrowP = {};
-        this.forts.forEach(f => { this.arrowP[`${f.c},${f.r}`] = [f.c, f.r - 1]; }); // up
-        this.arrowP['1,2'] = [3, 1];
-        this.arrowP['5,2'] = [3, 1];
-        // (3,1) is the topmost clickable fortress — point it toward the enemy base
-        {
-            const {x:fx, y:fy} = h2p(3, 1);
-            const {x:tx, y:ty} = h2p(this.EB.c, this.EB.r);
-            const [nc, nr] = stepInDir(3, 1, Math.atan2(ty-fy, tx-fx));
-            if (nc>=0 && nc<COLS && nr>=0 && nr<ROWS) this.arrowP['3,1'] = [nc, nr];
-        }
-        // NOTE: no arrowP[EB] — player units at EB trigger win condition
-        this.arrowP[`${this.PB.c},${this.PB.r}`] = [5, 10]; // spawn direction only
+        this.forts.forEach(f => { this.arrowP[`${f.c},${f.r}`] = [f.c, f.r - 1]; });
+        Object.entries(md.arrowPlayerOverrides).forEach(([k, v]) => { this.arrowP[k] = v; });
 
-        /* ── Enemy arrow map (arrowE) — three explicit lanes ── */
+        /* ── Enemy arrow map: load directly from config ── */
         this.arrowE = {};
-        // Left lane: 1,2 → 1,4 → 1,6 → 1,8 → 2,9 → 3,9(fort) → 4,10 → (stepInDir to PB)
-        this.arrowE['1,2'] = [1, 4];
-        this.arrowE['1,4'] = [1, 6];
-        this.arrowE['1,6'] = [1, 8];
-        this.arrowE['1,8'] = [2, 9];
-        this.arrowE['2,9'] = [3, 9];   // guide to center fort
-        // Center lane: 3,5 → 3,9 → 4,10
-        this.arrowE['3,5'] = [3, 9];
-        this.arrowE['3,9'] = [4, 10];
-        this.arrowE['4,10'] = [5, 10]; // guide toward PB
-        this.arrowE['5,10'] = [6, 11]; // arrive at PB
-        // Right lane: 5,2 → 5,4 → 5,6 → 5,8 → 4,9 → 3,9(fort) → 4,10 → 5,10 → 6,11(PB)
-        this.arrowE['5,2'] = [5, 4];
-        this.arrowE['5,4'] = [5, 6];
-        this.arrowE['5,6'] = [5, 8];
-        this.arrowE['5,8'] = [4, 9];   // merge toward center
-        this.arrowE['4,9'] = [3, 9];   // center fort
-        // Junction (3,1) starts pointing at left lane; rotated by AI timer
-        this.aiLane = 0; // 0=left, 1=center, 2=right
+        Object.entries(md.arrowEnemy).forEach(([k, v]) => { this.arrowE[k] = v; });
+        this.aiLane  = 0;
         this.aiLaneT = 0;
-        this.arrowE['3,1'] = [1, 2];
-        this.arrowE[`${this.EB.c},${this.EB.r}`] = [1, 0];
-        this.arrowE['1,0'] = [3, 1]; // EB exit → junction
-        // NOTE: no arrowE[PB] — enemy units at PB trigger win condition
 
         /* ── Player fortress click options ── */
         this.fortOptP = {};   // k -> [[c,r], ...]
@@ -188,7 +166,7 @@ class GameScene extends Phaser.Scene {
         this.gHp   = this.add.graphics().setDepth(3);
 
         this.visible = new Set();
-        this.mapData = this.cache.json.get('mapdata');
+        this.mapData = md;
 
         this.buildHexSprites();
         this.drawGrid();
@@ -246,7 +224,6 @@ class GameScene extends Phaser.Scene {
                 }
 
                 /* Arrow overlay */
-                const FIXED = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
                 const isBase = (c===this.EB.c&&r===this.EB.r)||(c===this.PB.c&&r===this.PB.r);
 
                 if (isBase) {
@@ -254,7 +231,7 @@ class GameScene extends Phaser.Scene {
                     const dp = this.arrowP[this.k(c,r)];
                     if (dp) { const {x:tx,y:ty}=h2p(dp[0],dp[1]); this.drawArrow(x,y,tx,ty,0xffffff,0); }
                 } else if (isFort) {
-                    const isFixed = FIXED.some(([fc,fr])=>fc===c&&fr===r);
+                    const isFixed = this.fixedForts.some(([fc,fr])=>fc===c&&fr===r);
                     // Player arrow (left-offset) — only if player owns fortress
                     if (ow==='player') {
                         const dp = this.arrowP[this.k(c,r)];
@@ -426,16 +403,17 @@ class GameScene extends Phaser.Scene {
         this.add.image(W/2, py + UI_H/2, 'uiback')
             .setDisplaySize(W, UI_H).setDepth(4);
 
-        this.goldTxt = this.add.text(12, py+7, '💰 80', {
+        this.goldTxt = this.add.text(12, py+7, `💰 ${GC.economy.initialGold}`, {
             fontSize:'15px', color:'#ffdd44', fontStyle:'bold'
         }).setDepth(5);
 
-        this.aiGoldTxt = this.add.text(W-12, py+7, 'AI💰 80', {
+        this.aiGoldTxt = this.add.text(W-12, py+7, `AI💰 ${GC.economy.initialGold}`, {
             fontSize:'11px', color:'#ff8888'
         }).setOrigin(1, 0).setDepth(5);
 
         const types = ['cavalry', 'archer', 'infantry'];
-        const bw = 105, bh = 76, by = py + 30, gap = 8;
+        const bw = GC.render.unitBtnWidth, bh = GC.render.unitBtnHeight,
+              by = py + GC.render.unitBtnOffsetY, gap = GC.render.unitBtnGap;
         const bx0 = (W - (bw*3 + gap*2)) / 2;
 
         this.btns = types.map((type, i) => {
@@ -493,7 +471,7 @@ class GameScene extends Phaser.Scene {
             const d = Math.hypot(p.x-x, p.y-y);
             if (d < bd) { bd = d; best = {c,r}; }
         }
-        if (!best || bd > SZ + 6) return;
+        if (!best || bd > SZ + GC.render.hexClickTolerance) return;
         if (best.c === this.PB.c && best.r === this.PB.r) {
             const cost = UDEFS[this.sel].cost;
             if (this.gold >= cost) {
@@ -508,8 +486,7 @@ class GameScene extends Phaser.Scene {
     }
 
     onFortClick(c, r) {
-        const FIXED = [[1,8],[5,8],[1,4],[5,4],[1,2],[5,2]];
-        if (FIXED.some(([fc,fr]) => fc===c && fr===r)) return;
+        if (this.fixedForts.some(([fc,fr]) => fc===c && fr===r)) return;
         const k = this.k(c, r);
         const opts = this.fortOptP[k] || [];
         if (!opts.length) return;
@@ -673,39 +650,42 @@ class GameScene extends Phaser.Scene {
     }
 
     update(time, delta) {
-        this.tick(Math.min(delta, 100));
+        this.tick(Math.min(delta, GC.combat.maxDeltaMs));
     }
 
     /* ── Main tick ─────────────────────────────────────── */
     tick(dt) {
         if (this.over || this.paused) return;
 
-        /* Gold regen every 1s */
+        const eco = GC.economy;
+        const ai  = GC.ai;
+
+        /* Gold regen */
         this.goldT += dt;
-        if (this.goldT >= 1000) {
+        if (this.goldT >= eco.regenInterval) {
             this.goldT = 0;
-            const aiMult = [0.6, 1.0, 1.5][this.settings.aiDiff];
-            this.gold   = Math.min(this.gold   + 10, 200);
-            this.aiGold = Math.min(this.aiGold + 10 * aiMult, 200);
+            const aiMult = ai.goldMultipliers[this.settings.aiDiff];
+            this.gold   = Math.min(this.gold   + eco.regenPerSec,           eco.maxGold);
+            this.aiGold = Math.min(this.aiGold + eco.regenPerSec * aiMult,  eco.maxGold);
             /* Fortress bonus */
             const pf = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='player').length;
             const ef = this.forts.filter(f => this.hexOwner[this.k(f.c,f.r)]==='enemy').length;
-            this.gold   = Math.min(this.gold   + pf*6, 200);
-            this.aiGold = Math.min(this.aiGold + ef*6 * aiMult, 200);
+            this.gold   = Math.min(this.gold   + pf * eco.fortBonusPerSec,            eco.maxGold);
+            this.aiGold = Math.min(this.aiGold + ef * eco.fortBonusPerSec * aiMult,   eco.maxGold);
         }
 
-        /* AI lane rotation every 7s */
+        /* AI lane rotation */
         this.aiLaneT += dt;
-        if (this.aiLaneT >= 7000) {
+        if (this.aiLaneT >= ai.laneRotateInterval) {
             this.aiLaneT = 0;
-            this.aiLane = (this.aiLane + 1) % 3;
-            const laneTargets = [[1,2],[3,5],[5,2]];
-            this.arrowE['3,1'] = laneTargets[this.aiLane];
+            this.aiLane = (this.aiLane + 1) % this.mapData.aiLaneTargets.length;
+            const junctionKey = `${this.mapData.enemyBase.c+1},${this.mapData.enemyBase.r+1}`;
+            this.arrowE['3,1'] = this.mapData.aiLaneTargets[this.aiLane];
         }
 
-        /* Player auto-spawn — 每秒最多 1 個 */
+        /* Player auto-spawn */
         this.playerSpawnT = (this.playerSpawnT || 0) + dt;
-        if (this.playerSpawnT >= 1000) {
+        if (this.playerSpawnT >= GC.player.autoSpawnInterval) {
             this.playerSpawnT = 0;
             const cost = UDEFS[this.sel].cost;
             if (this.gold >= cost) {
@@ -714,9 +694,9 @@ class GameScene extends Phaser.Scene {
             }
         }
 
-        /* AI spawn — 依難易度調整間隔 */
+        /* AI spawn */
         this.aiT += dt;
-        const aiInterval = [1600, 1000, 700][this.settings.aiDiff];
+        const aiInterval = ai.spawnIntervals[this.settings.aiDiff];
         if (this.aiT >= aiInterval) { this.aiT = 0; this.aiSpawn(); }
 
         /* Update all units */
@@ -754,7 +734,7 @@ class GameScene extends Phaser.Scene {
         const sec  = Math.ceil(this.timeLeft);
         const mm   = String(Math.floor(sec / 60)).padStart(2, '0');
         const ss   = String(sec % 60).padStart(2, '0');
-        const warn = this.timeLeft <= 30;
+        const warn = this.timeLeft <= GC.timer.warnSeconds;
         this.timerTxt.setText(`${mm}:${ss}`);
         this.timerTxt.setColor(warn ? '#ff4444' : '#eeddaa');
 
@@ -805,14 +785,14 @@ class GameScene extends Phaser.Scene {
         if (foes.length > 0) {
             /* Fight */
             u.atkT += dt;
-            if (u.atkT >= 1100) {
+            if (u.atkT >= GC.combat.attackInterval) {
                 u.atkT = 0;
                 const tgt = foes.reduce((a,b) => a.hp<=b.hp ? a : b);
                 const def = UDEFS[u.type];
                 let dmg = u.atk;
-                if      (def.beats === tgt.type) dmg = Math.round(dmg * 1.6);
-                else if (def.loses === tgt.type) dmg = Math.round(dmg * 0.6);
-                dmg += Phaser.Math.Between(-2, 3);
+                if      (def.beats === tgt.type) dmg = Math.round(dmg * GC.combat.beatMultiplier);
+                else if (def.loses === tgt.type) dmg = Math.round(dmg * GC.combat.loseMultiplier);
+                dmg += Phaser.Math.Between(GC.combat.damageVarianceMin, GC.combat.damageVarianceMax);
                 tgt.hp -= dmg;
                 tgt.attackedBy = u.id;   // 被攻擊 → 記錄攻擊者以便反擊
                 if (tgt.hp <= 0) tgt.dead = true;
@@ -855,8 +835,8 @@ class GameScene extends Phaser.Scene {
         const gIdx  = groupKeys.indexOf(myKey);
         const gTot  = groupKeys.length;
         const ang   = gTot > 1 ? (gIdx / gTot) * Math.PI * 2 : 0;
-        const offR  = gTot > 1 ? Math.min(9, SZ * 0.28) : 0;
-        const lerpT = 1 - Math.pow(0.78, dt / 16);
+        const offR  = gTot > 1 ? Math.min(GC.render.unitGroupMaxOffset, SZ * GC.render.unitGroupOffsetFactor) : 0;
+        const lerpT = 1 - Math.pow(GC.render.unitLerpBase, dt / GC.render.unitLerpFrameMs);
         u.x += (x + Math.cos(ang)*offR - u.x) * lerpT;
         u.y += (y + Math.sin(ang)*offR - u.y) * lerpT;
     }
@@ -878,7 +858,8 @@ class GameScene extends Phaser.Scene {
             groups.get(k).push(u);
         });
 
-        const BAR_H = 3, BAR_GAP = 1;
+        const { hpBarHeight: BAR_H, hpBarGap: BAR_GAP, hpBarOffsetY: BAR_OFF,
+                groupStackMax, unitGroupOffsetFactor, unitGroupMaxOffset } = GC.render;
 
         groups.forEach(grp => {
             const rep = grp[0];
@@ -902,11 +883,11 @@ class GameScene extends Phaser.Scene {
 
             const count = grp.length;
 
-            if (count <= 8) {
+            if (count <= groupStackMax) {
                 // Stacked HP bars going upward, one per unit
                 grp.forEach((u, i) => {
                     const ratio = Math.max(0, u.hp / u.maxHp);
-                    const barY  = vy - r - 5 - i * (BAR_H + BAR_GAP);
+                    const barY  = vy - r - BAR_OFF - i * (BAR_H + BAR_GAP);
                     this.gHp.fillStyle(0x111111, 0.85);
                     this.gHp.fillRect(vx - r, barY, r * 2, BAR_H);
                     const hc = ratio > 0.6 ? 0x44ee44 : ratio > 0.3 ? 0xffee22 : 0xee2222;
@@ -916,9 +897,9 @@ class GameScene extends Phaser.Scene {
                 rep.lbl.setText(UDEFS[rep.type].ch).setFontSize('11px')
                     .setPosition(vx, vy).setVisible(true);
             } else {
-                // > 8 units: show average HP bar + count on label
+                // > groupStackMax units: show average HP bar + count on label
                 const avgRatio = grp.reduce((s, u) => s + u.hp / u.maxHp, 0) / count;
-                const barY = vy - r - 5;
+                const barY = vy - r - BAR_OFF;
                 this.gHp.fillStyle(0x111111, 0.85);
                 this.gHp.fillRect(vx - r, barY, r * 2, BAR_H);
                 const hc = avgRatio > 0.6 ? 0x44ee44 : avgRatio > 0.3 ? 0xffee22 : 0xee2222;
@@ -973,9 +954,9 @@ class GameScene extends Phaser.Scene {
         });
         if (!bleedCount) { u.bleedTick = 0; return; }
         u.bleedTick += dt;
-        if (u.bleedTick >= 1500) {
+        if (u.bleedTick >= GC.combat.bleedInterval) {
             u.bleedTick = 0;
-            const dmg = bleedCount * 5;
+            const dmg = bleedCount * GC.combat.bleedDamagePerFort;
             u.hp -= dmg;
             this.showDmg(u.x, u.y, dmg, u.team);
             if (u.hp <= 0) u.dead = true;
@@ -1017,8 +998,8 @@ class GameScene extends Phaser.Scene {
                 if (this.visible.has(`${c},${r}`)) continue;
                 const {x, y} = h2p(c, r);
                 const pts = Array.from({length:6}, (_,i) => ({
-                    x: x + (SZ - 0.5) * Math.cos(Math.PI / 3 * i),
-                    y: y + (SZ - 0.5) * Math.sin(Math.PI / 3 * i)
+                    x: x + (SZ - GC.render.fogInset) * Math.cos(Math.PI / 3 * i),
+                    y: y + (SZ - GC.render.fogInset) * Math.sin(Math.PI / 3 * i)
                 }));
                 this.gFog.fillStyle(0x020509, 0.90);
                 this.gFog.beginPath();
@@ -1034,7 +1015,8 @@ class GameScene extends Phaser.Scene {
     aiSpawn() {
         let pick = 'infantry';
 
-        if (this.settings.aiDiff === 0) {
+        const EASY_DIFF = 0;
+        if (this.settings.aiDiff === EASY_DIFF) {
             /* Easy: always spawn infantry */
             pick = 'infantry';
         } else {
@@ -1142,7 +1124,7 @@ class StartScene extends Phaser.Scene {
 /* ─── Phaser init ────────────────────────────────────── */
 new Phaser.Game({
     type: Phaser.AUTO,
-    width: W, height: H,
+    width: GC.canvas.width, height: GC.canvas.height,
     backgroundColor: '#060c14',
     scene: [StartScene, GameScene],
     scale: {

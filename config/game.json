@@ -1,0 +1,59 @@
+{
+  "canvas": {
+    "width": 390,
+    "height": 780
+  },
+  "grid": {
+    "cols": 7,
+    "rows": 12,
+    "hexSize": 28,
+    "uiHeight": 148,
+    "gridTop": 36,
+    "gridOffsetX": 69
+  },
+  "economy": {
+    "initialGold": 80,
+    "maxGold": 200,
+    "regenPerSec": 10,
+    "fortBonusPerSec": 6,
+    "regenInterval": 1000
+  },
+  "timer": {
+    "matchDuration": 300,
+    "warnSeconds": 30
+  },
+  "player": {
+    "autoSpawnInterval": 1000
+  },
+  "ai": {
+    "laneRotateInterval": 7000,
+    "spawnIntervals": [1600, 1000, 700],
+    "goldMultipliers": [0.6, 1.0, 1.5]
+  },
+  "combat": {
+    "attackInterval": 1100,
+    "beatMultiplier": 1.6,
+    "loseMultiplier": 0.6,
+    "damageVarianceMin": -2,
+    "damageVarianceMax": 3,
+    "bleedInterval": 1500,
+    "bleedDamagePerFort": 5,
+    "maxDeltaMs": 100
+  },
+  "render": {
+    "groupStackMax": 8,
+    "unitGroupOffsetFactor": 0.28,
+    "unitGroupMaxOffset": 9,
+    "unitLerpBase": 0.78,
+    "unitLerpFrameMs": 16,
+    "hpBarHeight": 3,
+    "hpBarGap": 1,
+    "hpBarOffsetY": 5,
+    "fogInset": 0.5,
+    "hexClickTolerance": 6,
+    "unitBtnWidth": 105,
+    "unitBtnHeight": 76,
+    "unitBtnOffsetY": 30,
+    "unitBtnGap": 8
+  }
+}
