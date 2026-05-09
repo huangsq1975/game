@@ -8,7 +8,10 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#060c14; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
 canvas { display:block; touch-action:none; }
-#worldmap { display:none; position:fixed; inset:0; z-index:50; background:#000008; }
+#worldmap {
+    display:none; position:absolute; z-index:50; background:#000008;
+    /* 尺寸在 JS 中根據 Phaser canvas 動態設定 */
+}
 #worldmap canvas { width:100% !important; height:100% !important; touch-action:none; }
 #map-btn {
     position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
@@ -19,8 +22,8 @@ canvas { display:block; touch-action:none; }
     box-shadow:0 0 10px rgba(0,200,80,0.2);
 }
 #wm-back {
-    position:fixed; bottom:14px; left:50%; transform:translateX(-50%);
-    z-index:61; padding:9px 28px;
+    position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
+    z-index:61; padding:7px 28px;
     background:#0c1820; border:1px solid #2a4a6a; border-radius:8px;
     color:#aaddff; font-size:14px; font-family:sans-serif;
     cursor:pointer; display:none; white-space:nowrap;
@@ -1156,7 +1159,9 @@ class WorldMap {
 
         this._initGL();
         this._initControls();
-        window.addEventListener('resize', () => this._resize());
+        window.addEventListener('resize', () => {
+            if (document.getElementById('worldmap').style.display === 'block') this._resize();
+        });
         this._resize();
     }
 
@@ -1360,7 +1365,6 @@ class WorldMap {
         this._raf=requestAnimationFrame(()=>this._tick());
         const gl=this.gl;
 
-        if(!this.drag.on) this.rot.y+=0.0025;
         this.rot.x=Math.max(-1.4,Math.min(1.4,this.rot.x));
 
         gl.clearColor(0,0,0.03,1);
@@ -1413,10 +1417,27 @@ class WorldMap {
         el.addEventListener('touchend',()=>{this.drag.on=false;});
     }
 
-    /* ═══ Resize ════════════════════════════════════════════ */
+    /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
     _resize() {
-        this.cv.width=innerWidth; this.cv.height=innerHeight;
-        this.gl.viewport(0,0,innerWidth,innerHeight);
+        const phaserCanvas = document.querySelector('canvas');
+        const wm = document.getElementById('worldmap');
+        if (phaserCanvas && wm.style.display === 'block') {
+            const rect = phaserCanvas.getBoundingClientRect();
+            // UI 面板高度按比例換算（Phaser 內部 UI_H / H * 渲染高度）
+            const uiRatio = GC.grid.uiHeight / GC.canvas.height;
+            const uiPx = rect.height * uiRatio;
+            const mapH = rect.height - uiPx;
+            wm.style.left   = rect.left + 'px';
+            wm.style.top    = rect.top  + 'px';
+            wm.style.width  = rect.width + 'px';
+            wm.style.height = mapH + 'px';
+            this.cv.width  = Math.round(rect.width);
+            this.cv.height = Math.round(mapH);
+        } else {
+            this.cv.width  = innerWidth;
+            this.cv.height = innerHeight;
+        }
+        this.gl.viewport(0, 0, this.cv.width, this.cv.height);
     }
 
     /* ═══ Show / Hide ═══════════════════════════════════════ */
