@@ -23,6 +23,40 @@ class WorldMapItems {
         this._terrainSeed = terrainSeed;      // number            Perlin 種子
         this._perm        = null;             // Uint8Array(512)   快取置換表
         this._items       = [];               // 放置結果列表
+        this.capturedVis  = new Set();        // 已占領放置點的 vi 集合
+        this._fogDist     = null;             // Int16Array：每個 vi 到最近占領點的 BFS 距離
+    }
+
+    /* ── 多源 BFS：計算每格到最近占領點的距離 ──────── */
+    recomputeFog() {
+        const n    = this._centroids.length;
+        const dist = new Int16Array(n).fill(-1);
+        const queue = [];
+        for (const vi of this.capturedVis) { dist[vi] = 0; queue.push(vi); }
+        let head = 0;
+        while (head < queue.length) {
+            const cur = queue[head++], d = dist[cur];
+            for (const nb of this._adj[cur]) {
+                if (dist[nb] < 0) { dist[nb] = d + 1; queue.push(nb); }
+            }
+        }
+        this._fogDist = dist;
+    }
+
+    /* ── 取格子迷霧透明度 ────────────────────────────
+     *  d ≤ 2 : 0.00（清晰）
+     *  d = 3 : 0.35（輕半透明）
+     *  d = 4 : 0.65（中半透明）
+     *  d = 5 : 0.88（重半透明，近迷霧）
+     *  d ≥ 6 : 1.00（完全迷霧，不可點擊）
+     */
+    getFogAlpha(vi) {
+        if (!this._fogDist) return 1.0;
+        const d = this._fogDist[vi];
+        if (d < 0) return 1.0;
+        if (d <= 2) return 0.0;
+        if (d >= 6) return 1.0;
+        return [0.35, 0.65, 0.88][d - 3];
     }
 
     /* ── Perlin 置換表（與 _drawEarth 同種子）─────────── */
@@ -230,6 +264,11 @@ class WorldMapItems {
         this._items = result;
         /* 記錄第一個放置點的球面坐標，供 WorldMap 初始旋轉使用 */
         this.firstItemCen = result.length > 0 ? result[0].cen : null;
+        /* 第一放置點默認占領，計算初始迷霧 */
+        if (result.length > 0) {
+            this.capturedVis.add(result[0].vi);
+            this.recomputeFog();
+        }
         /* 通知 WorldMap 更新坐標顯示（load 為非同步，可能晚於 show）*/
         if (typeof this.onLoaded === 'function') this.onLoaded();
     }

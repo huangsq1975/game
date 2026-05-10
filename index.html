@@ -1679,12 +1679,44 @@ class WorldMap {
         return coords;
     }
 
+    /* ═══ 迷霧遮罩：按格子多邊形填色 ══════════════════ */
+    _drawFog(mvp,R){
+        const wmi=this._wmItems; if(!wmi||!wmi._fogDist) return;
+        const cells=this._cellCoords, ctx=this.lctx;
+        if(!cells||!ctx) return;
+        const W=this.lv.width, H=this.lv.height;
+        for(let vi=0;vi<cells.length;vi++){
+            const cell=cells[vi]; if(!cell||!cell.poly) continue;
+            const alpha=wmi.getFogAlpha(vi); if(alpha<=0) continue;
+            /* 背面剔除 */
+            const[cx,cy,cz]=cell.cen;
+            if(R[2]*cx+R[6]*cy+R[10]*cz<0) continue;
+            /* 投影多邊形頂點 */
+            let ok=true;
+            const pts=cell.poly.map(([pcx,pcy,pcz])=>{
+                const pvx=mvp[0]*pcx+mvp[4]*pcy+mvp[8]*pcz+mvp[12];
+                const pvy=mvp[1]*pcx+mvp[5]*pcy+mvp[9]*pcz+mvp[13];
+                const pvw=mvp[3]*pcx+mvp[7]*pcy+mvp[11]*pcz+mvp[15];
+                if(pvw<=0){ok=false;return null;}
+                return[(pvx/pvw*0.5+0.5)*W,(-pvy/pvw*0.5+0.5)*H];
+            });
+            if(!ok||pts.length<3) continue;
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0],pts[0][1]);
+            for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k][0],pts[k][1]);
+            ctx.closePath();
+            ctx.fillStyle=`rgba(4,10,22,${alpha.toFixed(3)})`;
+            ctx.fill();
+        }
+    }
+
     /* ═══ Draw (x,y) labels on 2D overlay canvas ═══════════ */
     _drawLabels(mvp,R){
         const cells=this._cellCoords, ctx=this.lctx;
         if(!cells||!ctx) return;
         const W=this.lv.width, H=this.lv.height;
         ctx.clearRect(0,0,W,H);
+        this._drawFog(mvp,R);
         ctx.textAlign='center';
         ctx.textBaseline='middle';
         const sel=this._selectedCell;
@@ -1894,13 +1926,15 @@ class WorldMap {
         const hx=s*dx, hy=s*dy_, ez=-s+this.zoom;
         const [wx,wy,wz]=this._qRotV(this._qConj(this._q),[hx,hy,ez]);
         const cells=this._cellCoords; if(!cells)return;
-        let best=-Infinity, bestCell=null;
+        let best=-Infinity, bestCell=null, bestVi=-1;
         for(let i=0;i<cells.length;i++){
             const c=cells[i]; if(!c)continue;
             const d=c.cen[0]*wx+c.cen[1]*wy+c.cen[2]*wz;
-            if(d>best){best=d;bestCell=c;}
+            if(d>best){best=d;bestCell=c;bestVi=i;}
         }
         if(!bestCell)return;
+        /* 迷霧區域（距離 ≥ 6 格）不可點擊 */
+        if(this._wmItems&&this._wmItems.getFogAlpha(bestVi)>=1.0) return;
         this._selectedCell=bestCell;
         const el=document.getElementById('wm-coords');
         if(el) el.textContent=`${bestCell.x}, ${bestCell.y}`;
