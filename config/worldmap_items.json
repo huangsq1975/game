@@ -7,16 +7,26 @@
       "atlasImage": "UITexture/Tilesets.png",
       "atlasFrame": { "x": 722, "y": 100, "w": 64, "h": 56 },
       "_atlasFrame": "圖集中的像素座標與尺寸",
+      "firstTile": {
+        "_": "第一個放置點專用圖示（覆蓋 tile/atlasFrame）",
+        "tile":       "Tilesets/TileSets/HexaRealm/Tiles/Citadel.png",
+        "atlasFrame": { "x": 1870, "y": 529, "w": 60, "h": 54 },
+        "displaySize": { "w": 24, "h": 22 }
+      },
+      "lastTile": {
+        "_": "最後一個放置點（antipodal）專用圖示（覆蓋 tile/atlasFrame）",
+        "tile":       "Tilesets/TileSets/HexaRealm/Tiles/AcademyT.png",
+        "atlasFrame": { "x": 1022, "y": 377, "w": 60, "h": 51 },
+        "displaySize": { "w": 24, "h": 20 }
+      },
       "landOnly":   true,
       "_landOnly":  "只放在陸地格（Perlin 高度 >= 0.50，排除海洋與海岸），海洋格子不放",
       "neighborRadius": 3,
-      "_neighborRadius": "每個放置物在此格子半徑內必須有 neighborCount 個其他放置物",
-      "neighborCount": [1, 3],
-      "_neighborCount": "合法的鄰居數量列表（1=成對，3=四元組），不符合則不放",
+      "_neighborRadius": "每個放置物在此格子半徑內必須有 1 個其他放置物（成對）",
       "maxPairs":   8,
       "_maxPairs":  "最多放置的「對」數（每對2個，最終物品數 = maxPairs * 2）",
       "displaySize": { "w": 24, "h": 21 },
-      "_displaySize": "在 2D overlay canvas 上繪製的像素大小"
+      "_displaySize": "在 2D overlay canvas 上繪製的像素大小（一般格子）"
     }
   ]
 }

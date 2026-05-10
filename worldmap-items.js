@@ -122,7 +122,7 @@ class WorldMapItems {
 
         for (const itemDef of (cfg.items || [])) {
 
-            /* 載入圖集圖片 */
+            /* 載入共用圖集圖片（所有 tile 共用同一張 atlas）*/
             const img = new Image();
             await new Promise(res => { img.onload = res; img.onerror = res; img.src = itemDef.atlasImage; });
             const frame    = itemDef.atlasFrame   || { x:0, y:0, w:64, h:56 };
@@ -130,7 +130,16 @@ class WorldMapItems {
             const dh       = (itemDef.displaySize || {}).h || 21;
             const radius   = itemDef.neighborRadius ?? 3;
             const maxPairs = itemDef.maxPairs || 8;
-            const mkItem   = vi => ({ vi, tile:itemDef.tile, cen:this._centroids[vi], img, frame, dw, dh });
+
+            /* override 允許替換特定點的圖示（tile/atlasFrame/displaySize）*/
+            const mkItem = (vi, override) => {
+                const ov    = override || {};
+                const fr    = ov.atlasFrame  || frame;
+                const odw   = (ov.displaySize || {}).w || dw;
+                const odh   = (ov.displaySize || {}).h || dh;
+                const tile  = ov.tile || itemDef.tile;
+                return { vi, tile, cen: this._centroids[vi], img, frame: fr, dw: odw, dh: odh };
+            };
 
             /* 篩選陸地格（排除海洋）*/
             const landSet = new Set();
@@ -161,17 +170,17 @@ class WorldMapItems {
                 return cands;
             };
 
-            /* 放置一對，並封鎖雙方 radius 範圍 */
+            /* 放置一對，並封鎖雙方 radius 範圍；ovA/ovB 為圖示 override */
             const forbidden = new Set();
-            const placePair = (viA, viB) => {
-                result.push(mkItem(viA), mkItem(viB));
+            const placePair = (viA, viB, ovA, ovB) => {
+                result.push(mkItem(viA, ovA), mkItem(viB, ovB));
                 for (const anchor of [viA, viB]) {
                     for (const nb of this._bfsSet(anchor, radius)) forbidden.add(nb);
                 }
             };
 
             /* ── 成對放置（保留最後一對給 antipodal）─── */
-            let firstA  = -1;
+            let firstA    = -1;
             let pairCount = 0;
 
             for (const viA of landArr) {
@@ -185,24 +194,24 @@ class WorldMapItems {
                 if (cands.length === 0) continue;
 
                 const viB = cands[Math.floor(rs() * cands.length)];
+                /* 第一對的 A 點套用 firstTile override */
+                const ovA = (firstA === -1) ? itemDef.firstTile : undefined;
                 if (firstA === -1) firstA = viA;
-                placePair(viA, viB);
+                placePair(viA, viB, ovA, undefined);
                 pairCount++;
             }
 
-            /* ── 最後一對：antipodal of firstA ────────── */
+            /* ── 最後一對：antipodal of firstA，套用 lastTile override ── */
             if (firstA !== -1 && pairCount < maxPairs) {
                 const [ax, ay, az] = this._centroids[firstA];
-                /* 球體對面 = (-ax, -ay, -az)，找最近陸地格 */
                 const antiVi = this._nearestLand(-ax, -ay, -az, forbidden);
                 if (antiVi !== -1) {
                     const cands = findCandidates(antiVi, forbidden);
                     if (cands.length > 0) {
                         const viB = cands[Math.floor(rs() * cands.length)];
-                        placePair(antiVi, viB);
+                        placePair(antiVi, viB, itemDef.lastTile, undefined);
                     } else {
-                        /* 找不到搭檔時退化為單放（仍放在最後）*/
-                        result.push(mkItem(antiVi));
+                        result.push(mkItem(antiVi, itemDef.lastTile));
                     }
                 }
             }
