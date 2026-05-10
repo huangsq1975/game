@@ -51,11 +51,11 @@ class WorldMapItems {
      *  d ≥ 6 : 1.00（完全迷霧，不可點擊）
      */
     getFogAlpha(vi) {
-        if (!this._fogDist) return 1.0;
+        if (!this._fogDist) return 0.0;  // 尚未載入：不阻擋點擊、不遮霧
         const d = this._fogDist[vi];
-        if (d < 0) return 1.0;
-        if (d <= 2) return 0.0;
-        if (d >= 6) return 1.0;
+        if (d < 0) return 1.0;           // 完全未到達：全霧
+        if (d <= 2) return 0.0;          // 占領核心：清晰
+        if (d >= 6) return 1.0;          // 遠端：完全迷霧
         return [0.35, 0.65, 0.88][d - 3];
     }
 

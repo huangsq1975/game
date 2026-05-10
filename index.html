@@ -1356,7 +1356,10 @@ class WorldMap {
         this._wmItems = new WorldMapItems(
             this._cellCentroids, this._cellAdj, this._cellCoords, GC.worldMap.terrainSeed
         );
-        this._wmItems.onLoaded = () => this._updateItemCoordsDisplay();
+        this._wmItems.onLoaded = () => {
+            this._applyFirstItemRotation();
+            this._updateItemCoordsDisplay();
+        };
         this._wmItems.load();
         this._initControls();
         window.addEventListener('resize', () => {
@@ -1972,6 +1975,15 @@ class WorldMap {
     }
 
     /* ═══ Show / Hide ═══════════════════════════════════════ */
+    /* 旋轉球體讓第一放置點正對屏幕中央 */
+    _applyFirstItemRotation() {
+        if (this._wmItems && this._wmItems.firstItemCen) {
+            const [cx, cy, cz] = this._wmItems.firstItemCen;
+            this._q = this._qFaceCenter(cx, cy, cz);
+            this._targetRot = null;
+        }
+    }
+
     /* 更新左上角第一/最後放置點坐標顯示 */
     _updateItemCoordsDisplay() {
         const icEl = document.getElementById('wm-item-coords');
@@ -2006,12 +2018,7 @@ class WorldMap {
         document.getElementById('wm-ui').style.display='flex';
         document.getElementById('map-btn').style.display='none';
         this._resize();
-        /* 旋轉球體讓第一放置點正對屏幕中央 */
-        if (this._wmItems && this._wmItems.firstItemCen) {
-            const [cx, cy, cz] = this._wmItems.firstItemCen;
-            this._q = this._qFaceCenter(cx, cy, cz);
-            this._targetRot = null;
-        }
+        this._applyFirstItemRotation();   // load() 已完成時立即生效
         this._updateItemCoordsDisplay();
         if(!this._raf)this._tick();
     }
