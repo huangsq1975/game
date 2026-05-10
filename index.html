@@ -69,6 +69,14 @@ canvas { display:block; touch-action:none; }
 }
 .wm-toggle.on  { background:#1a4a7a; color:#88ddff; }
 .wm-toggle.off { background:#1a1a2a; color:#557799; }
+#wm-item-coords {
+    display:none; position:fixed; z-index:52;
+    left:8px; top:8px;
+    background:rgba(8,18,30,0.82); border:1px solid #2a4a6a; border-radius:8px;
+    padding:6px 12px; font-family:monospace; font-size:12px;
+    color:#aaddff; line-height:1.7; pointer-events:none;
+    white-space:nowrap;
+}
 </style>
 </head>
 <body>
@@ -80,6 +88,7 @@ canvas { display:block; touch-action:none; }
     <span id="wm-coords"></span>
     <button id="wm-settings-btn" onclick="wmToggleSettings(event)">⚙</button>
 </div>
+<div id="wm-item-coords"></div>
 <div id="wm-settings-panel">
     <div class="wm-setting-row">
         <span class="wm-setting-label">網格顯示</span>
@@ -1347,6 +1356,7 @@ class WorldMap {
         this._wmItems = new WorldMapItems(
             this._cellCentroids, this._cellAdj, GC.worldMap.terrainSeed
         );
+        this._wmItems.onLoaded = () => this._updateItemCoordsDisplay();
         this._wmItems.load();
         this._initControls();
         window.addEventListener('resize', () => {
@@ -1928,6 +1938,23 @@ class WorldMap {
     }
 
     /* ═══ Show / Hide ═══════════════════════════════════════ */
+    /* 更新左上角第一/最後放置點坐標顯示 */
+    _updateItemCoordsDisplay() {
+        const icEl = document.getElementById('wm-item-coords');
+        if (!icEl || !this._wmItems) return;
+        /* 地圖未開啟時不顯示 */
+        if (document.getElementById('worldmap').style.display !== 'block') return;
+        const items  = this._wmItems.items;
+        const coords = this._cellCoords;
+        const fmt = vi => { const c = coords && coords[vi]; return c ? `(${c.x},${c.y})` : `#${vi}`; };
+        if (items.length > 0) {
+            const first = items[0];
+            const last  = items[items.length - 1];
+            icEl.innerHTML = `⚔ 第一點 ${fmt(first.vi)}<br>🎓 最後點 ${fmt(last.vi)}`;
+            icEl.style.display = 'block';
+        }
+    }
+
     /* 計算讓球面點 (cx,cy,cz) 正對鏡頭（+Z 方向）的四元數 */
     _qFaceCenter(cx, cy, cz) {
         // 將 (cx,cy,cz) 旋轉到 (0,0,1)：
@@ -1951,12 +1978,14 @@ class WorldMap {
             this._q = this._qFaceCenter(cx, cy, cz);
             this._targetRot = null;
         }
+        this._updateItemCoordsDisplay();
         if(!this._raf)this._tick();
     }
     hide() {
         cancelAnimationFrame(this._raf);this._raf=null;
         document.getElementById('worldmap').style.display='none';
         document.getElementById('wm-ui').style.display='none';
+        document.getElementById('wm-item-coords').style.display='none';
         document.getElementById('map-btn').style.display='block';
     }
 

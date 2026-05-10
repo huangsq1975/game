@@ -220,6 +220,8 @@ class WorldMapItems {
         this._items = result;
         /* 記錄第一個放置點的球面坐標，供 WorldMap 初始旋轉使用 */
         this.firstItemCen = result.length > 0 ? result[0].cen : null;
+        /* 通知 WorldMap 更新坐標顯示（load 為非同步，可能晚於 show）*/
+        if (typeof this.onLoaded === 'function') this.onLoaded();
     }
 
     /* ── 在 2D overlay 上繪製物品圖示 ───────────────── */
