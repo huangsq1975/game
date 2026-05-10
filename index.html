@@ -94,6 +94,7 @@ canvas { display:block; touch-action:none; }
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 <script src="units.js"></script>
+<script src="worldmap-items.js"></script>
 <script>
 'use strict';
 
@@ -1340,9 +1341,13 @@ class WorldMap {
         this.lv  = lv;
         this.lctx= lv.getContext('2d');
 
-        this._items = [];         // 球體上放置的物品（陸地格子中心列表）
+        this._wmItems = null;     // WorldMapItems 實例（_initGL 後建立）
         this._initGL();
-        this._loadItemConfig();   // 異步讀取物品配置並放置
+        /* 建立物品管理器並異步放置（需在 _initGL 之後，格子坐標已就緒）*/
+        this._wmItems = new WorldMapItems(
+            this._cellCentroids, this._cellAdj, GC.worldMap.terrainSeed
+        );
+        this._wmItems.load();
         this._initControls();
         window.addEventListener('resize', () => {
             if (document.getElementById('worldmap').style.display === 'block') this._resize();
@@ -1715,163 +1720,7 @@ class WorldMap {
                 ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
             }
         }
-        this._drawItems(mvp,R);
-    }
-
-    /* ═══ World map item config: load → place → draw ═══════ */
-
-    /* 建立（或取用快取）與 _drawEarth 相同種子的 Perlin 置換表 */
-    _getTerrainPerm() {
-        if(this.__permCache) return this.__permCache;
-        let _s=GC.worldMap.terrainSeed;
-        const rng01=()=>{_s^=_s<<13;_s^=_s>>17;_s^=_s<<5;return(_s>>>0)/0x100000000;};
-        const p=new Uint8Array(256);
-        for(let i=0;i<256;i++) p[i]=i;
-        for(let i=255;i>0;i--){const j=Math.floor(rng01()*(i+1));const t=p[i];p[i]=p[j];p[j]=t;}
-        const pm=new Uint8Array(512);
-        for(let i=0;i<512;i++) pm[i]=p[i&255];
-        return (this.__permCache=pm);
-    }
-
-    /* 判斷球體格子 vi 是否為陸地（Perlin 高度 >= 0.50）*/
-    _isLandCell(vi) {
-        const [sx,sy,sz]=this._cellCentroids[vi];
-        const perm=this._getTerrainPerm();
-        const fade=t=>t*t*t*(t*(t*6-15)+10);
-        const lerp=(a,b,t)=>a+t*(b-a);
-        const G=[[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
-                 [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1],[1,1,0],[-1,1,0],[0,-1,1],[0,-1,-1]];
-        const n3=(x,y,z)=>{
-            const xi=Math.floor(x)&255,yi=Math.floor(y)&255,zi=Math.floor(z)&255;
-            const xf=x-Math.floor(x),yf=y-Math.floor(y),zf=z-Math.floor(z);
-            const u=fade(xf),v=fade(yf),w=fade(zf);
-            const A=perm[xi]+yi,AA=perm[A]+zi,AB=perm[A+1]+zi;
-            const B=perm[xi+1]+yi,BA=perm[B]+zi,BB=perm[B+1]+zi;
-            const dot=(i,dx,dy,dz)=>{const g=G[perm[i]%16];return g[0]*dx+g[1]*dy+g[2]*dz;};
-            return lerp(lerp(lerp(dot(AA,xf,yf,zf),dot(BA,xf-1,yf,zf),u),
-                            lerp(dot(AB,xf,yf-1,zf),dot(BB,xf-1,yf-1,zf),u),v),
-                       lerp(lerp(dot(AA+1,xf,yf,zf-1),dot(BA+1,xf-1,yf,zf-1),u),
-                            lerp(dot(AB+1,xf,yf-1,zf-1),dot(BB+1,xf-1,yf-1,zf-1),u),v),w);
-        };
-        const fbm=(x,y,z,oct)=>{let v=0,a=0.5,f=1,mx=0;for(let i=0;i<oct;i++){v+=n3(x*f,y*f,z*f)*a;mx+=a;a*=0.5;f*=2;}return v/mx;};
-        const h=Math.max(0,Math.min(1,fbm(sx*2.2,sy*2.2,sz*2.2,7)*1.4+0.5));
-        return h>=0.50; // 0.50=沙灘以上才算陸地
-    }
-
-    /* 異步讀取 worldmap_items.json → 載入圖集 → 放置物品 */
-    async _loadItemConfig() {
-        let cfg;
-        try { cfg=await fetch('config/worldmap_items.json').then(r=>r.json()); }
-        catch(e){ console.warn('worldmap_items.json 讀取失敗',e); return; }
-
-        const placed=[];
-        const cells=this._cellCoords, adj=this._cellAdj;
-        if(!cells||!adj) return;
-
-        for(const itemDef of (cfg.items||[])){
-            /* 載入圖集圖片 */
-            const img=new Image();
-            await new Promise(res=>{ img.onload=res; img.onerror=res; img.src=itemDef.atlasImage; });
-            const frame   = itemDef.atlasFrame||{x:0,y:0,w:64,h:56};
-            const dw      = (itemDef.displaySize||{}).w||24;
-            const dh      = (itemDef.displaySize||{}).h||21;
-            const radius  = itemDef.neighborRadius??3;  // 鄰居搜索半徑
-            const maxPairs= itemDef.maxPairs||8;
-
-            /* BFS：取 vi 出發半徑 r 內的所有格子集合 */
-            const bfsSet=(vi,r)=>{
-                const s=new Set([vi]); const q=[[vi,0]]; let h=0;
-                while(h<q.length){
-                    const[cur,d]=q[h++];
-                    if(d<r) for(const nb of adj[cur]) if(!s.has(nb)){s.add(nb);q.push([nb,d+1]);}
-                }
-                return s;
-            };
-
-            /* 篩選陸地格（海洋排除：_isLandCell 使用 Perlin 高度 >= 0.50）*/
-            const landSet=new Set();
-            for(let vi=0;vi<cells.length;vi++){
-                if(cells[vi]&&this._isLandCell(vi)) landSet.add(vi);
-            }
-
-            /* 打亂陸地格順序（固定種子）*/
-            const landArr=[...landSet];
-            let _rs=0xdeadbeef>>>0;
-            const rs=()=>{_rs^=_rs<<13;_rs^=_rs>>17;_rs^=_rs<<5;return(_rs>>>0)/0x100000000;};
-            for(let i=landArr.length-1;i>0;i--){
-                const j=Math.floor(rs()*(i+1));
-                [landArr[i],landArr[j]]=[landArr[j],landArr[i]];
-            }
-
-            /* 貪婪成對放置
-             * 規則：每個放置物在 radius 格內恰好有 1 個（成對）或 3 個（四元組）同類。
-             * 實作「成對」策略：
-             *   1. 找格子 A（非禁止、為陸地）
-             *   2. 在 A 的 radius 格內找陸地格 B（非禁止）作為搭檔
-             *   3. 放置 A 和 B
-             *   4. 將 A 和 B 各自 radius 格範圍全部標記為禁止
-             *      → 確保外部不會有第三個物品進入 A 或 B 的 radius 範圍
-             *      → A 的鄰居恰好只有 B（1個） ✓，B 的鄰居恰好只有 A（1個） ✓
-             */
-            const forbidden=new Set();
-            let pairCount=0;
-
-            for(const viA of landArr){
-                if(forbidden.has(viA)||pairCount>=maxPairs) continue;
-
-                /* 在 radius 步內找未禁止的陸地格作為搭檔 */
-                const candidates=[];
-                const qc=[[viA,0]]; const vc=new Set([viA]); let hc=0;
-                while(hc<qc.length){
-                    const[cur,d]=qc[hc++];
-                    if(d>0&&landSet.has(cur)&&!forbidden.has(cur)) candidates.push(cur);
-                    if(d<radius) for(const nb of adj[cur]) if(!vc.has(nb)){vc.add(nb);qc.push([nb,d+1]);}
-                }
-                if(candidates.length===0) continue;
-
-                /* 隨機選一個搭檔 */
-                const viB=candidates[Math.floor(rs()*candidates.length)];
-
-                /* 放置這一對 */
-                const mkItem=vi=>({vi, tile:itemDef.tile, cen:this._cellCentroids[vi], img, frame, dw, dh});
-                placed.push(mkItem(viA), mkItem(viB));
-                pairCount++;
-
-                /* 禁止 A 和 B 各自 radius 格範圍（確保無其他物品侵入） */
-                for(const anchor of [viA,viB]){
-                    for(const nb of bfsSet(anchor,radius)) forbidden.add(nb);
-                }
-            }
-        }
-        this._items=placed;
-    }
-
-    /* 在 2D overlay 上繪製已放置的物品圖示 */
-    _drawItems(mvp,R){
-        if(!this._items.length) return;
-        const ctx=this.lctx, W=this.lv.width, H=this.lv.height;
-        for(const item of this._items){
-            const[cx,cy,cz]=item.cen;
-            const rz=R[2]*cx+R[6]*cy+R[10]*cz;
-            if(rz<0.12) continue; // 背面不繪製
-            const vx=mvp[0]*cx+mvp[4]*cy+mvp[8]*cz+mvp[12];
-            const vy=mvp[1]*cx+mvp[5]*cy+mvp[9]*cz+mvp[13];
-            const vw=mvp[3]*cx+mvp[7]*cy+mvp[11]*cz+mvp[15];
-            if(vw<=0) continue;
-            const sx=(vx/vw*0.5+0.5)*W, sy=(-vy/vw*0.5+0.5)*H;
-            /* 根據深度縮放（越遠越小）*/
-            const scale=Math.max(0.5,Math.min(1,rz));
-            const dw=item.dw*scale, dh=item.dh*scale;
-            const f=item.frame;
-            if(item.img&&item.img.complete&&item.img.naturalWidth>0){
-                ctx.drawImage(item.img,f.x,f.y,f.w,f.h, sx-dw/2,sy-dh/2, dw,dh);
-            } else {
-                /* 圖片未就緒時的備用標記 */
-                ctx.beginPath(); ctx.arc(sx,sy,4*scale,0,Math.PI*2);
-                ctx.fillStyle='rgba(255,120,40,0.85)'; ctx.fill();
-                ctx.strokeStyle='#ff6600'; ctx.lineWidth=1; ctx.stroke();
-            }
-        }
+        if (this._wmItems) this._wmItems.draw(ctx, W, H, mvp, R);
     }
 
     _drawGrid(mvp) {
