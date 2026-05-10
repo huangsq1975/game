@@ -1354,7 +1354,7 @@ class WorldMap {
         this._initGL();
         /* 建立物品管理器並異步放置（需在 _initGL 之後，格子坐標已就緒）*/
         this._wmItems = new WorldMapItems(
-            this._cellCentroids, this._cellAdj, GC.worldMap.terrainSeed
+            this._cellCentroids, this._cellAdj, this._cellCoords, GC.worldMap.terrainSeed
         );
         this._wmItems.onLoaded = () => this._updateItemCoordsDisplay();
         this._wmItems.load();

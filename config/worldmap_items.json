@@ -8,16 +8,18 @@
       "atlasFrame": { "x": 722, "y": 100, "w": 64, "h": 56 },
       "_atlasFrame": "圖集中的像素座標與尺寸",
       "firstTile": {
-        "_": "第一個放置點專用圖示（覆蓋 tile/atlasFrame）",
+        "_": "第一個放置點專用圖示與固定格子坐標",
         "tile":       "Tilesets/TileSets/HexaRealm/Tiles/Citadel.png",
         "atlasFrame": { "x": 1870, "y": 529, "w": 60, "h": 54 },
-        "displaySize": { "w": 24, "h": 22 }
+        "displaySize": { "w": 24, "h": 22 },
+        "cell": { "x": 36, "y": 13 }
       },
       "lastTile": {
-        "_": "最後一個放置點（antipodal）專用圖示（覆蓋 tile/atlasFrame）",
+        "_": "最後一個放置點專用圖示與固定格子坐標",
         "tile":       "Tilesets/TileSets/HexaRealm/Tiles/AcademyT.png",
         "atlasFrame": { "x": 1022, "y": 377, "w": 60, "h": 51 },
-        "displaySize": { "w": 24, "h": 20 }
+        "displaySize": { "w": 24, "h": 20 },
+        "cell": { "x": 17, "y": 11 }
       },
       "landOnly":   true,
       "_landOnly":  "只放在陸地格（Perlin 高度 >= 0.50，排除海洋與海岸），海洋格子不放",
