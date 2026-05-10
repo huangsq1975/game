@@ -1928,11 +1928,29 @@ class WorldMap {
     }
 
     /* ═══ Show / Hide ═══════════════════════════════════════ */
+    /* 計算讓球面點 (cx,cy,cz) 正對鏡頭（+Z 方向）的四元數 */
+    _qFaceCenter(cx, cy, cz) {
+        // 將 (cx,cy,cz) 旋轉到 (0,0,1)：
+        // w = 1 + dot, (x,y,z) = (cx,cy,cz) × (0,0,1) = (cy, -cx, 0)
+        const dot = cz;
+        if (dot >  0.9999) return [1, 0, 0, 0];            // 已正對
+        if (dot < -0.9999) return [0, 1, 0, 0];            // 正好對面，繞 X 軸 180°
+        const w = 1 + dot, x = cy, y = -cx;
+        const l = Math.sqrt(w*w + x*x + y*y);
+        return [w/l, x/l, y/l, 0];
+    }
+
     show() {
         document.getElementById('worldmap').style.display='block';
         document.getElementById('wm-ui').style.display='flex';
         document.getElementById('map-btn').style.display='none';
         this._resize();
+        /* 旋轉球體讓第一放置點正對屏幕中央 */
+        if (this._wmItems && this._wmItems.firstItemCen) {
+            const [cx, cy, cz] = this._wmItems.firstItemCen;
+            this._q = this._qFaceCenter(cx, cy, cz);
+            this._targetRot = null;
+        }
         if(!this._raf)this._tick();
     }
     hide() {

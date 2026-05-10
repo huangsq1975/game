@@ -218,6 +218,8 @@ class WorldMapItems {
         }
 
         this._items = result;
+        /* 記錄第一個放置點的球面坐標，供 WorldMap 初始旋轉使用 */
+        this.firstItemCen = result.length > 0 ? result[0].cen : null;
     }
 
     /* ── 在 2D overlay 上繪製物品圖示 ───────────────── */
