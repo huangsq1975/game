@@ -46,9 +46,9 @@
     "_": "AI 行為參數，陣列索引對應難易度 0=簡單 1=普通 2=困難",
     "laneRotateInterval": 7000,
     "_laneRotateInterval": "AI 切換進攻路線的間隔（ms）",
-    "spawnIntervals": [1600, 1000, 700],
+    "spawnIntervals": [2400, 1400, 900],
     "_spawnIntervals": "AI 出兵間隔（ms），值越小出兵越快",
-    "goldMultipliers": [0.6, 1.0, 1.5],
+    "goldMultipliers": [0.35, 0.7, 1.2],
     "_goldMultipliers": "AI 金幣獲取倍率，影響基礎回收與要塞加成"
   },
   "combat": {
