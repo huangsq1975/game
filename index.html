@@ -32,6 +32,11 @@ canvas { display:block; touch-action:none; }
     color:#aaddff; font-size:15px; font-family:sans-serif;
     cursor:pointer; white-space:nowrap;
     box-shadow:0 0 14px rgba(0,100,200,0.4);
+    transition: opacity 0.2s, filter 0.2s;
+}
+#wm-back.disabled {
+    opacity:0.38; filter:grayscale(1); cursor:default;
+    box-shadow:none;
 }
 #wm-coords {
     color:#ffe066; font-size:14px; font-family:monospace;
@@ -84,7 +89,7 @@ canvas { display:block; touch-action:none; }
 <!-- World Map Overlay -->
 <div id="worldmap"></div>
 <div id="wm-ui">
-    <button id="wm-back" onclick="toggleMap()">⚔ 返回戰鬥</button>
+    <button id="wm-back">⚔ 返回戰鬥</button>
     <span id="wm-coords"></span>
     <button id="wm-settings-btn" onclick="wmToggleSettings(event)">⚙</button>
 </div>
@@ -1115,6 +1120,10 @@ class GameScene extends Phaser.Scene {
         if (this.over) return;
         this.over = true;
 
+        /* 通知世界地圖系統戰鬥結束（先備份 vi 供「再來一局」使用）*/
+        const _pendingViBackup = _wmPendingCellVi;
+        wmOnBattleEnd(won);
+
         const ov = this.add.graphics().setDepth(12);
         ov.fillStyle(0x000000, 0.75);
         ov.fillRect(0, 0, W, H);
@@ -1137,11 +1146,24 @@ class GameScene extends Phaser.Scene {
             { fontSize:'14px', color:'#aabbcc' }
         ).setOrigin(0.5, 0.5).setDepth(13);
 
-        const btn = this.add.text(W/2, H/2+100, '  再來一局  ', {
-            fontSize:'24px', color:'#ffffff',
-            backgroundColor:'#1a3a5a', padding:{x:24, y:12}
+        /* 返回世界地圖 */
+        const btnMap = this.add.text(W/2, H/2+90, '  返回世界地圖  ', {
+            fontSize:'22px', color:'#88ffcc',
+            backgroundColor:'#0a2a1a', padding:{x:20, y:10}
         }).setOrigin(0.5, 0.5).setInteractive().setDepth(13);
-        btn.on('pointerdown', () => this.scene.restart());
+        btnMap.on('pointerdown', () => toggleMap());
+
+        /* 再來一局（重打同一個格子）*/
+        const btnRetry = this.add.text(W/2, H/2+145, '  再來一局  ', {
+            fontSize:'20px', color:'#aaddff',
+            backgroundColor:'#1a3a5a', padding:{x:20, y:10}
+        }).setOrigin(0.5, 0.5).setInteractive().setDepth(13);
+        btnRetry.on('pointerdown', () => {
+            /* 重打同一個格子：恢復 pending vi 再重啟 */
+            if (_pendingViBackup !== -1) _wmPendingCellVi = _pendingViBackup;
+            _wmBattleState = 'active';
+            this.scene.restart();
+        });
     }
 
 }
@@ -1941,6 +1963,12 @@ class WorldMap {
         this._selectedCell=bestCell;
         const el=document.getElementById('wm-coords');
         if(el) el.textContent=`${bestCell.x}, ${bestCell.y}`;
+
+        /* 若點選的是放置點 → 啟動戰鬥 */
+        if(this._wmItems){
+            const hit=this._wmItems.items.find(it=>it.vi===bestVi);
+            if(hit) wmStartBattle(bestVi);
+        }
     }
 
     /* ═══ Resize — 貼合 Phaser canvas 的戰鬥區域（去掉底部 UI）══ */
@@ -2156,6 +2184,54 @@ class WorldMap {
 }
 
 let _worldMap = null;
+
+/* ── 世界地圖戰鬥狀態 ─────────────────────────────────
+ *  'none'    : 無戰鬥（初始、戰鬥未開始）
+ *  'active'  : 戰鬥進行中
+ *  'ended'   : 戰鬥已結束（可返回）
+ */
+let _wmBattleState = 'none';
+let _wmPendingCellVi = -1;   // 待開打的世界地圖格子 vi
+
+function wmSetBattleState(state) {
+    _wmBattleState = state;
+    const btn = document.getElementById('wm-back');
+    if (!btn) return;
+    if (state === 'none') {
+        btn.classList.add('disabled');
+        btn.onclick = null;
+    } else {
+        btn.classList.remove('disabled');
+        btn.onclick = () => {
+            _worldMap.hide();
+            _scenesActiveBeforeMap.forEach(s => { try { s.scene.resume(); } catch(_){} });
+            _scenesActiveBeforeMap = [];
+        };
+    }
+}
+
+/* 從世界地圖點選放置點，啟動戰鬥 */
+function wmStartBattle(vi) {
+    _wmPendingCellVi = vi;
+    _wmBattleState = 'active';   // 先設定，toggleMap 內保護才能通過
+    /* 直接關閉世界地圖（繞過 toggleMap 的保護）*/
+    _worldMap.hide();
+    _scenesActiveBeforeMap.forEach(s => { try { s.scene.resume(); } catch(_){} });
+    _scenesActiveBeforeMap = [];
+    /* 重啟 GameScene */
+    const gs = phaserGame.scene.getScene('Game');
+    if (gs) gs.scene.restart();
+}
+
+/* GameScene 戰鬥結束後呼叫 */
+function wmOnBattleEnd(won) {
+    wmSetBattleState('ended');
+    if (won && _wmPendingCellVi !== -1 && _worldMap && _worldMap._wmItems) {
+        _worldMap._wmItems.capturedVis.add(_wmPendingCellVi);
+        _worldMap._wmItems.recomputeFog();
+    }
+    _wmPendingCellVi = -1;
+}
 let _scenesActiveBeforeMap = [];
 
 /* 將「世界地圖」按鈕定位在 Phaser UI 面板的底部條（兵種按鈕之下） */
@@ -2215,7 +2291,10 @@ function toggleMap() {
         _scenesActiveBeforeMap.forEach(s => s.scene.pause());
         if (!_worldMap) _worldMap = new WorldMap();
         _worldMap.show();
+        /* 同步按鈕狀態 */
+        wmSetBattleState(_wmBattleState);
     } else {
+        if (_wmBattleState !== 'active') return; // 無戰鬥時按鈕是灰的，防止誤觸
         _worldMap.hide();
         _scenesActiveBeforeMap.forEach(s => { try { s.scene.resume(); } catch(_){} });
         _scenesActiveBeforeMap = [];
@@ -2234,7 +2313,12 @@ window.addEventListener('resize', () => {
 (function waitCanvas() {
     if (phaserGame.canvas && phaserGame.canvas.getBoundingClientRect().width > 0) {
         positionMapBtn();
-        toggleMap(); // 默認進入遊戲先顯示世界地圖
+        wmSetBattleState('none'); // 初始：無戰鬥，按鈕灰度
+        /* 直接顯示世界地圖（繞過 toggleMap 保護）*/
+        _scenesActiveBeforeMap = phaserGame.scene.getScenes(true).slice();
+        _scenesActiveBeforeMap.forEach(s => s.scene.pause());
+        if (!_worldMap) _worldMap = new WorldMap();
+        _worldMap.show();
     } else {
         setTimeout(waitCanvas, 100);
     }
