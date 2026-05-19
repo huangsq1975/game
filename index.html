@@ -103,6 +103,10 @@ canvas { display:block; touch-action:none; }
         <span class="wm-setting-label">格子座標</span>
         <button class="wm-toggle on" id="wm-tog-coords" onclick="wmToggleCoords()">開</button>
     </div>
+    <div class="wm-setting-row">
+        <span class="wm-setting-label">戰爭迷霧</span>
+        <button class="wm-toggle on" id="wm-tog-fog" onclick="wmToggleFog()">開</button>
+    </div>
 </div>
 <button id="map-btn" onclick="toggleMap()">🌍 世界地圖</button>
 
@@ -1359,6 +1363,7 @@ class WorldMap {
         this._clickPos  = null;   // mouse-down position (click vs drag detection)
         this.showGrid   = true;   // 六邊形/五邊形網格顯示
         this.showCoords = true;   // 格子座標顯示
+        this.showFog    = true;   // 球體戰爭迷霧
 
         const cv = document.createElement('canvas');
         document.getElementById('worldmap').appendChild(cv);
@@ -1751,6 +1756,7 @@ class WorldMap {
 
     /* ═══ 迷霧遮罩：按格子多邊形填色 ══════════════════ */
     _drawFog(mvp,R){
+        if(!this.showFog) return;
         const wmi=this._wmItems; if(!wmi||!wmi._fogDist) return;
         const cells=this._cellCoords, ctx=this.lctx;
         if(!cells||!ctx) return;
@@ -2322,6 +2328,13 @@ function wmToggleCoords() {
     const btn = document.getElementById('wm-tog-coords');
     btn.textContent = wm.showCoords ? '開' : '關';
     btn.className = 'wm-toggle ' + (wm.showCoords ? 'on' : 'off');
+}
+function wmToggleFog() {
+    const wm = _worldMap; if(!wm) return;
+    wm.showFog = !wm.showFog;
+    const btn = document.getElementById('wm-tog-fog');
+    btn.textContent = wm.showFog ? '開' : '關';
+    btn.className = 'wm-toggle ' + (wm.showFog ? 'on' : 'off');
 }
 document.addEventListener('click', () => {
     document.getElementById('wm-settings-panel')?.classList.remove('open');
