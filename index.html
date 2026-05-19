@@ -1379,6 +1379,7 @@ class WorldMap {
             this._cellCentroids, this._cellAdj, this._cellCoords, GC.worldMap.terrainSeed
         );
         this._wmItems.onLoaded = () => {
+            this._bakeItemsToTexture();
             this._applyFirstItemRotation();
             this._updateItemCoordsDisplay();
         };
@@ -1573,7 +1574,8 @@ class WorldMap {
              void main(){gl_FragColor=u_color;}`
         );
         this._icoGrid=this._mkTruncIcoGrid(wmc.icoSubdivisions);
-        this._tex   =this._mkTex(this._drawEarth());
+        this._earthCv = this._drawEarth();
+        this._tex = this._mkTex(this._earthCv);
 
     }
 
@@ -1704,6 +1706,49 @@ class WorldMap {
         return coords;
     }
 
+    /* ═══ 烘焙物品圖示到地球紋理 ══════════════════════
+     * 將每個放置點的精靈圖直接繪製到 _earthCv，再重新上傳 WebGL 紋理。
+     * 物品因此成為紋理的一部分，隨球體旋轉 / 縮放完全一致。
+     * 格式換算：lon ∈ [-π,π] → px ∈ [0,W]；sphere-y → py via asin(−cy)。
+     * 赤道修正：等距矩形投影在高緯度水平方向被壓縮，以 1/cos(lat) 補償寬度。
+     */
+    _bakeItemsToTexture() {
+        const cv = this._earthCv; if (!cv) return;
+        const ctx = cv.getContext('2d');
+        const W = cv.width, H = cv.height;
+        const TAU = 2 * Math.PI;
+        /* 紋理像素尺寸 = 顯示尺寸 × SCALE，使物品在預設縮放下大小相符 */
+        const SCALE = 2.0;
+
+        for (const item of this._wmItems.items) {
+            if (!item.img || !item.img.complete || !item.img.naturalWidth) continue;
+            const [cx, cy, cz] = item.cen;
+            /* 球面坐標 → 紋理像素坐標 */
+            const lon = Math.atan2(cz, cx);
+            const px  = ((lon % TAU) + TAU) % TAU / TAU * W;
+            const py  = (Math.asin(-cy) / Math.PI + 0.5) * H;
+            /* 等距矩形水平補償（極區寬度補正） */
+            const lat    = Math.asin(-cy);
+            const cosLat = Math.max(0.15, Math.cos(lat));
+            const dh = item.dh * SCALE;
+            const dw = item.dw * SCALE / cosLat;
+            const f = item.frame;
+            /* 繪製三次以處理本初子午線（px≈0 或 px≈W）邊緣的環繞問題 */
+            for (const ox of [0, -W, W]) {
+                const dpx = px + ox;
+                if (dpx + dw / 2 < 0 || dpx - dw / 2 > W) continue;
+                ctx.drawImage(item.img, f.x, f.y, f.w, f.h,
+                              dpx - dw / 2, py - dh / 2, dw, dh);
+            }
+        }
+
+        /* 重新上傳紋理到 GPU */
+        const gl = this.gl;
+        gl.bindTexture(gl.TEXTURE_2D, this._tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+        gl.generateMipmap(gl.TEXTURE_2D);
+    }
+
     /* ═══ 迷霧遮罩：按格子多邊形填色 ══════════════════ */
     _drawFog(mvp,R){
         const wmi=this._wmItems; if(!wmi||!wmi._fogDist) return;
@@ -1787,7 +1832,7 @@ class WorldMap {
                 ctx.fillText(`${cell.x},${cell.y}`,sx,sy);
             }
         }
-        if (this._wmItems) this._wmItems.draw(ctx, W, H, mvp, R);
+        /* 物品圖示已烘焙到 WebGL 紋理，不再在 2D overlay 繪製 */
     }
 
     _drawGrid(mvp) {
